@@ -16,17 +16,30 @@ cd moon_horrizon
 open index.html        # or double-click it
 ```
 
-Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `ephemeris.js`, `viz.js`, `terrain.js`, `app.js`.
+Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `ephemeris.js`, `viz.js`, `globe.js`, `terrain.js`, `app.js`.
 
 - `ephemeris.js` is the sky math (`window.LunarEph`).
 - `sites.js` is the site catalogue (`window.LUNAR_SITES`, `window.LUNAR_GROUPS`).
 - `viz.js` draws the horizon, the chart, and the map (`window.LunarViz`).
+- `globe.js` draws the rotatable Moon and handles picking (`window.LunarGlobe`).
 - `terrain.js` is the measured LOLA horizon profiles (`window.LUNAR_TERRAIN`), generated offline by `tools/`.
 - `app.js` is the shell: state, controls, metrics, and the text.
 
 `terrain.js` is a script rather than a JSON file on purpose: `fetch()` of a local file is blocked over `file://`, and opening `index.html` by double-clicking it has to keep working.
 
 All times in the interface are UTC and labelled as such. The landing date and time inputs are UTC, not the local zone of the machine.
+
+### Two interfaces, one engine
+
+The header switches between **Simple** and **Expert**. Both run exactly the same computation; the only difference is how much of it is on screen.
+
+**Simple** is the default: a rotatable Moon and one card. Drag to spin it, scroll or `+`/`-` to zoom, arrow keys to steer, and click a marker to read that site. The lighting is not decoration — the terminator is drawn at the subsolar point the ephemeris returns for the playhead, so pressing **Play** shows the real terminator sweep. The blue ring marks the sub-Earth point, which is where Earth sits directly overhead.
+
+Fifteen of the thirty catalogue sites lie within a few degrees of the south pole and would overlap into one unclickable dot at globe scale, so they collapse into a single **South pole** marker. Clicking it flies the camera down to the pole and zooms in, at which point every polar site gets its own marker. Whatever site is currently selected always keeps its own labelled marker, even inside that cluster.
+
+The globe is a hand-drawn orthographic projection on a 2D canvas, not WebGL. That is deliberate: a WebGL texture loaded from a `file://` URL is treated as cross-origin and cannot be uploaded, which would break the double-click-to-open requirement.
+
+**Expert** is the full console: the site list, the horizon strip, the mission chart, the comparison table, the horizon and array controls, the date scan, and the CSV export. Nothing is removed in Simple mode, only hidden, and the mode is carried in the URL hash as `ui=simple` or `ui=expert`.
 
 ### Controls worth knowing
 
@@ -35,7 +48,7 @@ All times in the interface are UTC and labelled as such. The landing date and ti
 - Drag or click the chart to move the playhead. Space plays and pauses, arrow keys step one hour, Shift and an arrow steps one day.
 - **Scan the next year** ranks start times for the primary site at the current mission length, mask, and array. It is a 6-hour screen, not a flight product; click a result to open that date at full resolution.
 - **Download CSV** exports the primary site's samples: `time_utc, sun_alt_deg, sun_az_deg, earth_alt_deg, earth_az_deg, sun_frac, earth_disk, dte, joint, irradiance_w_m2, power_w_m2`.
-- The URL hash carries the scenario (sites, landing time, mission hours, mask, array, efficiency), so a link reloads the same trade. Custom coordinates are kept in `localStorage` on the machine that entered them.
+- The URL hash carries the scenario (interface mode, sites, landing time, mission hours, mask, array, efficiency), so a link reloads the same trade. Custom coordinates are kept in `localStorage` on the machine that entered them.
 
 ## Agreement with JPL Horizons
 

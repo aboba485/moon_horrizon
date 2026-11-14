@@ -24,7 +24,13 @@
         </div>
         <p class="lede">Pick a landing site and a date. See where the Sun and Earth sit relative to the horizon, then judge power and the direct link home.</p>
       </div>
-      <div class="season" id="season" aria-live="polite"></div>
+      <div class="top-right">
+        <div class="modes" role="group" aria-label="Interface mode">
+          <button type="button" id="mode-simple">Simple</button>
+          <button type="button" id="mode-expert">Expert</button>
+        </div>
+        <div class="season" id="season" aria-live="polite"></div>
+      </div>
     </header>
 
     <aside>
@@ -117,6 +123,14 @@
         <div class="selected-chips" id="chips" aria-label="Sites in this comparison"></div>
       </div>
 
+      <section class="simple" id="simple" aria-label="Globe view">
+        <div class="globe-wrap">
+          <canvas id="globe" width="760" height="760" tabindex="0" role="img"
+                  aria-label="Moon globe. Drag to rotate, scroll to zoom, click a landing site."></canvas>
+        </div>
+        <div class="simple-card" id="simple-card"></div>
+      </section>
+
       <section class="hero" aria-label="Horizon view">
         <canvas id="horizon" width="1200" height="880"></canvas>
         <div class="readout" id="readout"></div>
@@ -169,6 +183,7 @@
   <script src="sites.js"></script>
   <script src="ephemeris.js"></script>
   <script src="viz.js"></script>
+  <script src="globe.js"></script>
   <script src="terrain.js"></script>
   <script src="app.js"></script>
 </body>

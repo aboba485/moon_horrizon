@@ -136,6 +136,7 @@
   var terrain = window.LUNAR_TERRAIN || null;
 
   var state = {
+    ui: "simple",
     selected: ["mouton"],
     landingMs: 0,
     durationHours: 708.734,
@@ -476,6 +477,69 @@
         s.meanPower.toFixed(0) + " average watts per m\u00b2, night included");
   }
 
+  /* Simple mode's only readout. Same numbers the console shows, no controls.
+     Deliberately leads with the two fractions a lander actually lives on. */
+  function renderSimpleCard(model) {
+    var entry = model.sites[0];
+    var s = entry.summary;
+    if (!s) {
+      el("simple-card").innerHTML = "";
+      return;
+    }
+    var now = entry.now;
+    var site = entry.site;
+    var prof = entry.terrain;
+    var tight = tightestSun(entry);
+
+    function big(kind, label, value) {
+      return '<div><div class="label">' + label + '</div><div class="value ' + kind + '">' +
+        value + "</div></div>";
+    }
+
+    var arrayText = state.panelMode === "vertical"
+      ? "a vertical array tracking the Sun"
+      : state.panelMode === "horizontal"
+        ? "a flat panel"
+        : "a fixed " + state.tiltDeg + "\u00b0 tilt";
+
+    var note = "";
+    if (s.sunlitFrac > 0.995 && tight.margin < 1.5) {
+      note = '<p class="margin-note">Sunlit the whole window, but only by ' + deg(tight.margin, 2) +
+        " at its tightest, on " + utcStamp(tight.timeMs) +
+        ". A ridge finer than 120 m would end that.</p>";
+    } else if (!prof) {
+      note = '<p class="margin-note">No LOLA profile reaches this site, so its horizon is an assumption rather than a measurement.</p>';
+    }
+
+    el("simple-card").innerHTML =
+      '<div class="kicker">' + esc(site.program || site.status || "Landing site") + "</div>" +
+      "<h2>" + esc(site.name) + "</h2>" +
+      '<div class="coords">' + esc(latLonText(site)) + "</div>" +
+      '<div class="big">' +
+        big("sun", "Sunlight", pct(s.sunlitFrac)) +
+        big("earth", "Direct to Earth", pct(s.dteFrac)) +
+      "</div>" +
+      "<dl>" +
+        "<dt>Energy</dt><dd>" + energy(s.energyWh) + "/m\u00b2 \u00b7 " + s.meanPower.toFixed(0) + " W/m\u00b2 mean</dd>" +
+        "<dt>Longest night</dt><dd>" + msHours(s.longestNight.ms) + "</dd>" +
+        "<dt>Longest gap</dt><dd>" + msHours(s.longestBlackout.ms) + " with no link</dd>" +
+        /* Only worth a row where the Sun stays up: elsewhere it just reports how
+           far below the horizon midnight goes, which is not a margin. */
+        (s.sunlitFrac > 0.9
+          ? "<dt>Sun margin</dt><dd>" + deg(tight.margin, 2) + " at its worst</dd>"
+          : "") +
+        "<dt>Skyline</dt><dd>" + (prof
+          ? deg(prof.min, 1) + " to " + deg(prof.max, 1) + ", LOLA"
+          : "uniform " + deg(state.maskDeg, 1) + " mask") + "</dd>" +
+        "<dt>Sun now</dt><dd>" + deg(now.sunAlt) + " alt \u00b7 " + azDeg(now.sunAz) + " az</dd>" +
+        "<dt>Earth now</dt><dd>" + deg(now.earthAlt) + " alt \u00b7 " + (now.dte ? "link up" : "no link") + "</dd>" +
+      "</dl>" +
+      note +
+      '<p class="source">' + hours(state.durationHours) + " from " + utcStamp(state.landingMs) +
+      ", with " + arrayText + " at " + state.efficiencyPct +
+      "% cells. Airless geometry, checked against JPL Horizons to better than 0.01\u00b0.</p>";
+  }
+
   function renderCompare(model) {
     if (model.sites.length < 2) {
       el("compare").innerHTML = "";
@@ -656,7 +720,29 @@
     }).join("") + '<p class="help">A 6-hour screen, not a flight product. Open a date to read it at full resolution.</p>';
   }
 
+  /* The globe takes the whole catalogue, not just the selection, because its
+     whole job is letting you pick. The subsolar point in `now` is what places
+     the terminator, so the lighting is the ephemeris, not decoration. */
+  function globeModel(model) {
+    return {
+      catalogue: allSites(),
+      selectedIds: state.selected,
+      primaryId: model.primaryId,
+      now: model.sites[0].now
+    };
+  }
+
   function drawCanvases(model) {
+    if (state.ui === "simple") {
+      if (!window.LunarGlobe) return;
+      try {
+        LunarGlobe.drawGlobe(el("globe"), globeModel(model));
+      } catch (err) {
+        el("simple-card").insertAdjacentHTML("beforeend",
+          '<p class="margin-note">globe.js threw while drawing: ' + esc(err && err.message) + "</p>");
+      }
+      return;
+    }
     if (!window.LunarViz) return;
     try {
       LunarViz.drawMap(el("map"), model);
@@ -681,8 +767,12 @@
     if (wantText) {
       lastTextMs = Date.now();
       renderSeason(model.sites[0].now);
-      renderReadout(model);
-      renderPanelHint(model);
+      if (state.ui === "simple") {
+        renderSimpleCard(model);
+      } else {
+        renderReadout(model);
+        renderPanelHint(model);
+      }
     }
     if (!options.light) {
       syncTerrainInputs();
@@ -701,6 +791,24 @@
   function recompute() {
     render();
     writeHash();
+  }
+
+  /* ---------- interface mode ---------- */
+
+  function applyMode() {
+    var simple = state.ui === "simple";
+    document.querySelector(".app").classList.toggle("mode-simple", simple);
+    el("mode-simple").classList.toggle("on", simple);
+    el("mode-expert").classList.toggle("on", !simple);
+    el("mode-simple").setAttribute("aria-pressed", simple ? "true" : "false");
+    el("mode-expert").setAttribute("aria-pressed", simple ? "false" : "true");
+  }
+
+  function setMode(mode) {
+    if (state.ui === mode) return;
+    state.ui = mode;
+    applyMode();
+    recompute();
   }
 
   /* ---------- selection ---------- */
@@ -904,6 +1012,7 @@
 
   function writeHash() {
     var params = new URLSearchParams();
+    params.set("ui", state.ui);
     params.set("s", state.selected.join(","));
     params.set("t", utcIso(state.landingMs));
     params.set("d", String(state.durationHours));
@@ -929,6 +1038,9 @@
     if (!raw) return false;
     var params = new URLSearchParams(raw);
     var touched = false;
+
+    var ui = params.get("ui");
+    if (ui === "simple" || ui === "expert") state.ui = ui;
 
     var sites = params.get("s");
     if (sites) {
@@ -1165,6 +1277,30 @@
     });
     el("play").addEventListener("click", togglePlay);
 
+    el("mode-simple").addEventListener("click", function () {
+      setMode("simple");
+    });
+    el("mode-expert").addEventListener("click", function () {
+      setMode("expert");
+    });
+
+    if (window.LunarGlobe) {
+      var goTo = LunarGlobe.attach(el("globe"), {
+        model: function () {
+          return lastModel ? globeModel(lastModel) : null;
+        },
+        onChange: function () {
+          if (lastModel) drawCanvases(lastModel);
+        },
+        onPick: function (hit) {
+          /* A pole cluster is 17 sites inside a few degrees, so the first click
+             flies the camera in instead of guessing which one you meant. */
+          if (hit.cluster) goTo(-89, 0, 2.8);
+          else selectOnly(hit.id);
+        }
+      });
+    }
+
     el("map").addEventListener("click", function (e) {
       if (!window.LunarViz || !lastModel || typeof LunarViz.hitMap !== "function") return;
       var rect = el("map").getBoundingClientRect();
@@ -1237,6 +1373,7 @@
 
     window.addEventListener("hashchange", function () {
       if (readHash()) {
+        applyMode();
         syncPanelInputs();
         el("land-date").value = utcDateValue(state.landingMs);
         el("land-time").value = utcTimeValue(state.landingMs);
@@ -1250,8 +1387,11 @@
   /* ---------- boot ---------- */
 
   function fail(message) {
+    var html = '<div class="kicker">Not ready</div><p>' + esc(message) + "</p>";
     var readout = el("readout");
-    if (readout) readout.innerHTML = '<div class="kicker">Not ready</div><p>' + esc(message) + "</p>";
+    var card = el("simple-card");
+    if (readout) readout.innerHTML = html;
+    if (card) card.innerHTML = html;
   }
 
   function init() {
@@ -1261,6 +1401,7 @@
     }
     state.landingMs = Math.floor(Date.now() / HOUR) * HOUR;
     readHash();
+    applyMode();
     resetPlayhead();
     el("land-date").value = utcDateValue(state.landingMs);
     el("land-time").value = utcTimeValue(state.landingMs);

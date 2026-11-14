@@ -96,6 +96,85 @@ h1 {
 .season b { display: block; font-weight: 600; }
 .season span { color: var(--muted); font-family: var(--mono); font-size: 12px; }
 
+.top-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.modes {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.modes button {
+  padding: 7px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+.modes button.on { background: var(--panel-2); color: var(--ink); }
+
+/* Simple mode: one globe, one card. Everything the console does is still
+   loaded and computed, just not shown. */
+.simple { display: none; }
+.app.mode-simple { grid-template-columns: minmax(0, 1fr); }
+.app.mode-simple aside,
+.app.mode-simple .hero,
+.app.mode-simple .metrics,
+.app.mode-simple #compare,
+.app.mode-simple .chart-wrap,
+.app.mode-simple .split { display: none; }
+.app.mode-simple .simple {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.globe-wrap {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  max-width: 620px;
+  margin: 0 auto;
+  width: 100%;
+}
+#globe {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  touch-action: none;
+  cursor: grab;
+}
+#globe:active { cursor: grabbing; }
+
+.simple-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 16px 16px;
+}
+.simple-card .kicker { color: var(--sun); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+.simple-card h2 { margin: 3px 0 2px; font-size: 22px; letter-spacing: -0.02em; }
+.simple-card .coords { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.simple-card .big { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
+.simple-card .big div { border: 1px solid var(--line); border-radius: 12px; padding: 9px 11px; }
+.simple-card .big .label { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.simple-card .big .value { font-size: 24px; letter-spacing: -0.03em; margin-top: 2px; }
+.simple-card .big .sun { color: var(--sun-2); }
+.simple-card .big .earth { color: var(--earth-2); }
+.simple-card dl { display: grid; grid-template-columns: 96px 1fr; gap: 4px 8px; margin: 0; }
+.simple-card dt { color: var(--muted); font-size: 13px; }
+.simple-card dd { margin: 0; font-family: var(--mono); font-size: 12.5px; }
+.simple-card .margin-note {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--warn);
+  font-size: 12.5px;
+}
+.simple-card .source { margin: 10px 0 0; color: var(--faint); font-size: 11.5px; }
+
 aside {
   border-right: 1px solid var(--line);
   padding: 16px 16px 28px;
@@ -407,6 +486,7 @@ footer summary { cursor: pointer; color: var(--muted); }
 @media (max-width: 1100px) {
   .metrics { grid-template-columns: 1fr 1fr; }
   .split { grid-template-columns: 1fr; }
+  .app.mode-simple .simple { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }

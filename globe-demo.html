@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>globe.js demo</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #0c0b09; color: #f4efe6; font-family: "Outfit", sans-serif; }
+    .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px; }
+    canvas { width: 100%; aspect-ratio: 1; display: block; border: 1px solid rgba(243,232,214,.12); border-radius: 12px; touch-action: none; }
+    pre { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: #a79d90; white-space: pre-wrap; }
+    h2 { font-size: 14px; font-weight: 500; color: #a79d90; margin: 0 0 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div><h2>Interactive — drag, scroll, click a pin</h2><canvas id="g1" tabindex="0"></canvas><pre id="out">click a pin</pre></div>
+    <div><h2>Fixed near-side view, same instant</h2><canvas id="g2"></canvas><pre id="out2"></pre></div>
+  </div>
+  <script src="vendor/astronomy.browser.js"></script>
+  <script src="sites.js"></script>
+  <script src="ephemeris.js"></script>
+  <script src="globe.js"></script>
+  <script>
+    var when = Date.UTC(2026, 10, 14, 13, 0);
+    var site = window.LUNAR_SITES[0];
+    var now = LunarEph.evaluate(when, site.lat, site.lon, 0, { tiltDeg: 90, tracking: true, efficiency: 0.3 });
+    var model = {
+      catalogue: window.LUNAR_SITES,
+      selectedIds: ["mouton", "apollo11"],
+      primaryId: "mouton",
+      now: now
+    };
+    document.getElementById("out2").textContent =
+      "subsolar " + now.subSolarLat.toFixed(2) + ", " + now.subSolarLon.toFixed(2) +
+      "\nsubearth " + now.subEarthLat.toFixed(2) + ", " + now.subEarthLon.toFixed(2);
+
+    var c1 = document.getElementById("g1");
+    var c2 = document.getElementById("g2");
+    LunarGlobe.camera(c2).lat = 0;
+    LunarGlobe.camera(c2).lon = 0;
+
+    function draw() {
+      LunarGlobe.drawGlobe(c1, model);
+      LunarGlobe.drawGlobe(c2, model);
+    }
+    var goTo = LunarGlobe.attach(c1, {
+      model: function () { return model; },
+      onChange: function () { LunarGlobe.drawGlobe(c1, model); },
+      onPick: function (hit) {
+        var out = document.getElementById("out");
+        if (hit.cluster) {
+          out.textContent = "cluster of " + hit.cluster.length + ": " +
+            hit.cluster.map(function (s) { return s.short; }).join(", ");
+          goTo(-89, 0, 2.6);
+        } else {
+          model.primaryId = hit.id;
+          model.selectedIds = [hit.id];
+          out.textContent = "picked " + hit.id;
+          draw();
+        }
+      }
+    });
+    draw();
+    window.addEventListener("resize", draw);
+    window.__ready = true;
+  </script>
+</body>
+</html>

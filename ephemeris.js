@@ -315,6 +315,7 @@
       cosI,
       power: sky.irradiance * cosI * eff * sunFrac,
       subSolarLat: sky.subSolar.lat,
+      subSolarLon: sky.subSolar.lon,
       subEarthLat: sky.subEarth.lat,
       subEarthLon: sky.subEarth.lon,
       stations: view.stations
