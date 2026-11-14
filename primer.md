@@ -13,6 +13,7 @@ Lunar Horizon is a south-pole landing-site comparator for the 2026 NASA Space Ap
 
 - The page does not run until session 2 writes `viz.js` and session 3 writes `app.js`.
 - No LOLA terrain horizons. The mask is a uniform stand-in.
+- GitHub push to `aboba485/moon_horrizon` returned 403. Local `main` is commit `719f6b5`. The logged-in account `AlexBaranovIT` can read that repo and cannot write it. Add that account as a collaborator, then push.
 
 ## Next
 
