@@ -222,8 +222,12 @@
     return sample.stationAlt - mask;
   }
 
-  /* Session 1 is adding LunarEph.eventsFromSamples. Use it only when its output is
-     shaped the way the contract describes, otherwise walk the samples here. */
+  var EVENT_KEYS = ["sunset", "sunrise", "earthset", "earthrise", "linkDown", "linkUp"];
+
+  /* LunarEph.eventsFromSamples returns {sunset, sunrise, earthset, earthrise,
+     linkDown, linkUp}, each null or {t, kind}. It only fills the direction implied
+     by the clearance at the playhead, so a null is not an answer and we fall back
+     to walking the samples with the same clearance definitions. */
   function engineEvents(samples, fromMs, mask) {
     var fn = window.LunarEph && LunarEph.eventsFromSamples;
     if (typeof fn !== "function") return null;
@@ -233,9 +237,11 @@
     } catch (err) {
       return null;
     }
-    if (!Array.isArray(out) || !out.length) return null;
-    var usable = out.every(function (e) {
-      return e && typeof e.t === "number" && typeof e.type === "string" && typeof e.rise === "boolean";
+    if (!out || typeof out !== "object") return null;
+    var usable = EVENT_KEYS.every(function (key) {
+      if (!(key in out)) return false;
+      var value = out[key];
+      return value === null || (value && isFinite(value.t));
     });
     return usable ? out : null;
   }
@@ -257,17 +263,17 @@
     return null;
   }
 
+  function eventKeyFor(which, wantRise) {
+    if (which === "sun") return wantRise ? "sunrise" : "sunset";
+    if (which === "earth") return wantRise ? "earthrise" : "earthset";
+    return wantRise ? "linkUp" : "linkDown";
+  }
+
   function nextCrossing(samples, fromMs, which, mask, wantRise) {
     var fromEngine = engineEvents(samples, fromMs, mask);
     if (fromEngine) {
-      var wanted = which === "sun" ? /sun/i : /dte|link|earth/i;
-      var best = null;
-      for (var i = 0; i < fromEngine.length; i++) {
-        var e = fromEngine[i];
-        if (e.t < fromMs || e.rise !== !!wantRise || !wanted.test(e.type)) continue;
-        if (best === null || e.t < best) best = e.t;
-      }
-      if (best !== null) return best;
+      var hit = fromEngine[eventKeyFor(which, wantRise)];
+      if (hit && isFinite(hit.t) && hit.t >= fromMs) return hit.t;
     }
     return walkCrossing(samples, fromMs, which, mask, wantRise);
   }
