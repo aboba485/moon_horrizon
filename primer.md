@@ -17,7 +17,7 @@ Lunar Horizon is a south-pole landing-site comparator for the 2026 NASA Space Ap
 
 ## Next
 
-Open three Claude sessions on this folder and paste the three prompts from `SESSIONS.md`. They own different files and can run together.
+Open three Claude sessions and paste the three prompts from `SESSIONS.md` on GitHub. Each session clones https://github.com/aboba485/moon_horrizon and pushes its own files to `main`.
 
 Session 1: `ephemeris.js`, `sites.js`, `test/`, `ENGINE.md`.
 Session 2: `viz.js`, `viz-demo.html`.

@@ -1,12 +1,12 @@
 # Lunar Horizon — research dossier and three Claude sessions
 
-Project: `/Users/baranka/Projects/lunar-landing-navigator`
+Repo: https://github.com/aboba485/moon_horrizon
 
 NASA Space Apps Challenge 2026, challenge **Lunar Landing Site Navigator** (also listed under CLPS Lunar Mission Browser).
 
 Page: https://www.spaceappschallenge.org/2026/challenges/lunar-landing-site-navigator/
 
-Open this folder as the workspace for every session. The three sessions edit different files. Run them in parallel.
+Three Claude sessions clone that repo and work in parallel on `main`. Each prompt below includes the team rules. They do not share a working copy. GitHub is the handoff.
 
 | Session | Owns | Does not touch |
 | --- | --- | --- |
@@ -350,7 +350,7 @@ Copy rules: UTC everywhere, labeled. No “flight certified”. The footer alrea
 - `app.js`, hash/CSV/scan wiring, README — session 3
 - `ENGINE.md` and a sample-based event helper — session 1
 - No LOLA DEM, no real horizon masks, no 3D terrain
-- No GitHub remote
+- GitHub remote is https://github.com/aboba485/moon_horrizon on `main`. Sessions clone that, pull before they edit, and push their own files when a slice works.
 
 Run the existing check from the project root:
 
@@ -364,10 +364,32 @@ It needs network access to Horizons. A failure above 0.15° is a real regression
 
 # Prompt 1 — Sky engine
 
-Paste this whole block into a fresh Claude session whose workspace is `/Users/baranka/Projects/lunar-landing-navigator`.
+Paste this whole block into a fresh Claude session. Its first action is cloning the GitHub repo.
 
 ```
-You are session 1 of 3 on Lunar Horizon, a south-pole landing-site tool. Your only files are ephemeris.js, sites.js, test/, and a new ENGINE.md. Do not edit index.html, styles.css, app.js, or viz.js. Other sessions are writing those in parallel against the API below. If you change a return field, their work breaks.
+You are session 1 of 3 building Lunar Horizon together. The other two sessions are working at the same time on the other parts. You do not share a laptop. GitHub is the only handoff.
+
+Repo: https://github.com/aboba485/moon_horrizon
+Branch: main
+Start with: git clone https://github.com/aboba485/moon_horrizon.git
+Work inside that clone. Do not start from a leftover folder, and do not create a second repo.
+
+Who owns what:
+- Session 1, you, sky engine: ephemeris.js, sites.js, test/, ENGINE.md
+- Session 2, views: viz.js, viz-demo.html
+- Session 3, planner shell: app.js, index.html, styles.css, README.md
+Nobody edits vendor/, SESSIONS.md, CLAUDE.md, primer.md, or knowledge.md.
+
+Team rules, all three sessions:
+1. Touch only your files. A one-line change you want in someone else's file stays unmade. Say it in the commit message instead.
+2. git pull before the first edit. Before every push, run git pull --rebase origin main and then git push origin main. If the push is rejected, pull --rebase again and push again. Never force-push. Never reset --hard. Never delete main.
+3. A rebase conflict in a file you do not own: keep the version already on main. A conflict in a file you own: keep your work, and do not delete the other sessions' files while you resolve it.
+4. Commit small slices of your own files and push each slice to main. The task is unfinished until git status is clean and git push has succeeded. Your last message names the commit SHA and links https://github.com/aboba485/moon_horrizon
+5. Commit messages are one plain sentence about what changed. No Co-Authored-By line. No secrets, tokens, or .env files.
+6. The other sessions will push while you work. Pull again before you call the task done. Code to the contract in this prompt even if their files are not on main yet. When their files appear, pull them. Do not rewrite them.
+7. No build step, no framework, and no new astronomy library.
+
+Your files are ephemeris.js, sites.js, test/, and a new ENGINE.md. Do not edit index.html, styles.css, app.js, viz.js, or viz-demo.html. Sessions 2 and 3 are writing those against the API below. If you change a return field, their work breaks.
 
 The astronomy is already implemented and checked. On 2026-11-14 00:00 UTC at lat −85.416, lon 31.851, JPL Horizons airless apparent place is Sun az 94.875 el +1.171 and Earth az 327.030 el −0.805. This code returns 94.880 / +1.170 and 327.029 / −0.805. Seven other cases (south pole on 2026-06-21, Apollo 11, Slater Plain, the far-side equator) all agree within 0.007°. Subsolar latitude through 2026 stays inside ±1.59°. Keep that.
 
@@ -398,17 +420,39 @@ Your work:
 
 Do not add a build step, a framework, or a new astronomy library. vendor/astronomy.browser.js is the one the browser loads. vendor/astronomy.js is an unused CommonJS duplicate. Leave both.
 
-Done means ENGINE.md exists, eventsFromSamples is exported, both tests have been run, and a one-line note at the top of ENGINE.md says the other sessions may rely on the field lists above.
+Done means ENGINE.md exists, eventsFromSamples is exported, both tests have been run, a one-line note at the top of ENGINE.md says the other sessions may rely on the field lists above, and those commits are on origin/main. Paste the SHA and the GitHub link.
 ```
 
 ---
 
 # Prompt 2 — Horizon, chart, and map
 
-Paste this whole block into a fresh Claude session whose workspace is `/Users/baranka/Projects/lunar-landing-navigator`.
+Paste this whole block into a fresh Claude session. Its first action is cloning the GitHub repo.
 
 ```
-You are session 2 of 3 on Lunar Horizon. You create two files only: viz.js and viz-demo.html. Do not edit ephemeris.js, sites.js, index.html, styles.css, app.js, ENGINE.md, or anything in test/. Another session owns the app shell and will call the API below. Another session owns the sky math. The math is already checked against JPL Horizons to 0.007°. Do not reimplement it.
+You are session 2 of 3 building Lunar Horizon together. The other two sessions are working at the same time on the other parts. You do not share a laptop. GitHub is the only handoff.
+
+Repo: https://github.com/aboba485/moon_horrizon
+Branch: main
+Start with: git clone https://github.com/aboba485/moon_horrizon.git
+Work inside that clone. Do not start from a leftover folder, and do not create a second repo.
+
+Who owns what:
+- Session 1, sky engine: ephemeris.js, sites.js, test/, ENGINE.md
+- Session 2, you, views: viz.js, viz-demo.html
+- Session 3, planner shell: app.js, index.html, styles.css, README.md
+Nobody edits vendor/, SESSIONS.md, CLAUDE.md, primer.md, or knowledge.md.
+
+Team rules, all three sessions:
+1. Touch only your files. A one-line change you want in someone else's file stays unmade. Say it in the commit message instead.
+2. git pull before the first edit. Before every push, run git pull --rebase origin main and then git push origin main. If the push is rejected, pull --rebase again and push again. Never force-push. Never reset --hard. Never delete main.
+3. A rebase conflict in a file you do not own: keep the version already on main. A conflict in a file you own: keep your work, and do not delete the other sessions' files while you resolve it.
+4. Commit small slices of your own files and push each slice to main. The task is unfinished until git status is clean and git push has succeeded. Your last message names the commit SHA and links https://github.com/aboba485/moon_horrizon
+5. Commit messages are one plain sentence about what changed. No Co-Authored-By line. No secrets, tokens, or .env files.
+6. The other sessions will push while you work. Pull again before you call the task done. Code to the contract in this prompt even if their files are not on main yet. When their files appear, pull them. Do not rewrite them.
+7. No build step, no framework, and no new astronomy library.
+
+You create two files only: viz.js and viz-demo.html. Do not edit ephemeris.js, sites.js, index.html, styles.css, app.js, ENGINE.md, or anything in test/. Session 3 owns the app shell and will call the API below. Session 1 owns the sky math. The math is already checked against JPL Horizons to 0.007°. Do not reimplement it. Pull before you finish so you are drawing against the latest engine on main.
 
 Load order in viz-demo.html: vendor/astronomy.browser.js, then sites.js, then ephemeris.js, then viz.js. Classic script tags, not ES modules, so the demo works from file:// and from a static server. Global you must set: window.LunarViz.
 
@@ -456,17 +500,39 @@ Check your work by opening viz-demo.html. If you cannot open a browser, run a lo
 
 Do not add npm, a bundler, or a second astronomy library. Do not “improve” ephemeris.js.
 
-Done means viz.js defines the four functions, viz-demo.html runs against the real engine, Mouton’s horizon is a zoomed band, Apollo’s is not, Earth is drawn larger than the Sun, and north is centered.
+Done means viz.js defines the four functions, viz-demo.html runs against the real engine, Mouton’s horizon is a zoomed band, Apollo’s is not, Earth is drawn larger than the Sun, north is centered, and those commits are on origin/main. Paste the SHA and the GitHub link.
 ```
 
 ---
 
 # Prompt 3 — Planner shell
 
-Paste this whole block into a fresh Claude session whose workspace is `/Users/baranka/Projects/lunar-landing-navigator`.
+Paste this whole block into a fresh Claude session. Its first action is cloning the GitHub repo.
 
 ```
-You are session 3 of 3 on Lunar Horizon. You own app.js, index.html, styles.css, and README.md. Do not edit ephemeris.js, sites.js, viz.js, viz-demo.html, test/, or ENGINE.md. Those belong to other sessions that may be writing at the same time.
+You are session 3 of 3 building Lunar Horizon together. The other two sessions are working at the same time on the other parts. You do not share a laptop. GitHub is the only handoff.
+
+Repo: https://github.com/aboba485/moon_horrizon
+Branch: main
+Start with: git clone https://github.com/aboba485/moon_horrizon.git
+Work inside that clone. Do not start from a leftover folder, and do not create a second repo.
+
+Who owns what:
+- Session 1, sky engine: ephemeris.js, sites.js, test/, ENGINE.md
+- Session 2, views: viz.js, viz-demo.html
+- Session 3, you, planner shell: app.js, index.html, styles.css, README.md
+Nobody edits vendor/, SESSIONS.md, CLAUDE.md, primer.md, or knowledge.md.
+
+Team rules, all three sessions:
+1. Touch only your files. A one-line change you want in someone else's file stays unmade. Say it in the commit message instead. You may add the viz.js script tag to index.html, because that file is yours.
+2. git pull before the first edit. Before every push, run git pull --rebase origin main and then git push origin main. If the push is rejected, pull --rebase again and push again. Never force-push. Never reset --hard. Never delete main.
+3. A rebase conflict in a file you do not own: keep the version already on main. A conflict in a file you own: keep your work, and do not delete the other sessions' files while you resolve it.
+4. Commit small slices of your own files and push each slice to main. The task is unfinished until git status is clean and git push has succeeded. Your last message names the commit SHA and links https://github.com/aboba485/moon_horrizon
+5. Commit messages are one plain sentence about what changed. No Co-Authored-By line. No secrets, tokens, or .env files.
+6. The other sessions will push while you work. Pull again before you call the task done. Code to the contract in this prompt even if viz.js or eventsFromSamples is not on main yet. When they appear, pull and retest. Do not rewrite viz.js, viz-demo.html, ephemeris.js, sites.js, or test/.
+7. No build step, no framework, and no new astronomy library.
+
+You own app.js, index.html, styles.css, and README.md. Do not edit ephemeris.js, sites.js, viz.js, viz-demo.html, test/, or ENGINE.md.
 
 The sky math is done. window.LunarEph is loaded by index.html. It has been checked against JPL Horizons to within 0.007°. Trust it. On 2026-11-14 00:00 UTC at Mons Mouton (−85.416, 31.851) the Sun is about +1.17° at azimuth 95° and the Earth’s center is about −0.81°. The Earth limb is about 0.95° in radius, so the limb is essentially on the horizon while the center is below it. Say that kind of thing in the readout when it is true. Do not re-derive the ephemeris in the UI.
 
@@ -534,7 +600,7 @@ Acceptance you must actually run:
 4. Switch the primary to Apollo 11 over the same window. The horizon scale is owned by viz.js. You should see a high Sun arc in the numbers: sunMax well above 40°.
 5. Keyboard, hash reload, CSV header, and the scan click all work.
 
-If viz.js is not in the folder yet, still finish app.js against the API and say the canvases could not be checked. Check the numbers with a small node script that requires ./ephemeris.js. Those numbers do not depend on viz.
+If viz.js is not on main yet, still finish app.js against the API, push it, and say the canvases could not be checked. Check the numbers with a small node script that requires ./ephemeris.js. Those numbers do not depend on viz. Pull once more before the final test so a viz.js that landed during your work is the one the page loads.
 
-Done means a person can open index.html, compare a near-side polar site with Slater Plain, scrub a lunar day, read power and link time, and reload the same scenario from the URL.
+Done means a person can clone https://github.com/aboba485/moon_horrizon, open index.html, compare a near-side polar site with Slater Plain, scrub a lunar day, read power and link time, and reload the same scenario from the URL. Your commits are on origin/main. Paste the SHA and the GitHub link.
 ```

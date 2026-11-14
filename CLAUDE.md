@@ -2,6 +2,8 @@
 
 South-pole landing-site comparator. Sun and Earth on the horizon, power, and direct-to-Earth.
 
+Repo: https://github.com/aboba485/moon_horrizon on `main`. Clone that. Pull before editing. Push your own files. Never force-push.
+
 Read `SESSIONS.md` before editing. Three sessions split the work:
 
 - Session 1 owns `ephemeris.js`, `sites.js`, `test/`, `ENGINE.md`.
