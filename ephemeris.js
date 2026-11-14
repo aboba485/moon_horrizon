@@ -292,14 +292,18 @@
     const mask = options.maskDeg || 0;
     const panel = options.panel || { tiltDeg: 90, tracking: true, efficiency: 0.3 };
     const t0 = start instanceof Date ? start.getTime() : new Date(start).getTime();
+    if (!Number.isFinite(t0) || !Number.isFinite(durationMs) || durationMs < 0 ||
+        !Number.isFinite(step) || step <= 0) {
+      throw new RangeError("Mission requires a valid start, nonnegative finite duration, and positive finite step");
+    }
     const samples = [];
-    for (let t = t0; t <= t0 + durationMs + 1; t += step) {
+    for (let t = t0; ; t += step) {
       const stamp = new Date(Math.min(t, t0 + durationMs));
       const point = evaluate(stamp, lat, lon, mask, panel);
       delete point.sky;
       delete point.view;
       samples.push(point);
-      if (stamp.getTime() >= t0 + durationMs) break;
+      if (t >= t0 + durationMs) break;
     }
     return samples;
   }
@@ -325,6 +329,40 @@
       }
     }
     return { ms: best, start: bestStart };
+  }
+
+  // Interpolate only the supplied samples; never recompute the sky while scrubbing.
+  function eventsFromSamples(samples, fromMs, maskDeg = 0) {
+    const events = { sunset: null, sunrise: null, earthset: null, earthrise: null, linkDown: null, linkUp: null };
+    if (samples.length < 2 || !Number.isFinite(fromMs) ||
+        fromMs < samples[0].t || fromMs >= samples[samples.length - 1].t) return events;
+    const channels = [
+      { value: (s) => s.sunAlt + s.sunRadius - maskDeg, down: "sunset", up: "sunrise" },
+      { value: (s) => s.earthAlt + s.earthRadius - maskDeg, down: "earthset", up: "earthrise" },
+      { value: (s) => s.stationAlt - maskDeg, down: "linkDown", up: "linkUp" }
+    ];
+    let index = 0;
+    while (samples[index + 1].t <= fromMs) index++;
+    for (const channel of channels) {
+      const a = samples[index];
+      const b = samples[index + 1];
+      const atPlayhead = channel.value(a) + (channel.value(b) - channel.value(a)) *
+        ((fromMs - a.t) / (b.t - a.t));
+      const wantRise = atPlayhead <= 0;
+      const kind = wantRise ? channel.up : channel.down;
+      for (let i = index; i < samples.length - 1; i++) {
+        const before = channel.value(samples[i]);
+        const after = channel.value(samples[i + 1]);
+        const crosses = wantRise ? before <= 0 && after > 0 : before > 0 && after <= 0;
+        if (!crosses) continue;
+        const t = samples[i].t + (samples[i + 1].t - samples[i].t) * (-before / (after - before));
+        if (t > fromMs) {
+          events[kind] = { t, kind };
+          break;
+        }
+      }
+    }
+    return events;
   }
 
   function integrate(samples, key) {
@@ -508,6 +546,7 @@
     incidence,
     sampleMission,
     summarize,
+    eventsFromSamples,
     nextCrossing,
     scanWindows,
     stepMsFor
