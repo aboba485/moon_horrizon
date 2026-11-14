@@ -1,2 +1,6 @@
 .DS_Store
 *.log
+
+# LOLA source rasters, hundreds of megabytes each. Fetched by tools/fetch-lola.sh.
+# Only the generated terrain.js is committed.
+data/

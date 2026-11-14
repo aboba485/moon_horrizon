@@ -239,16 +239,56 @@
     return Math.max(0, Math.min(1, x));
   }
 
+  /* The horizon mask as a function of azimuth.
+     Accepts a plain number for a uniform mask, or { profile, offsetDeg } where
+     profile holds one elevation per azimuth bin, bin 0 at north, running
+     clockwise. Bins are interpolated so the skyline has no 1 degree steps. */
+  function maskResolver(maskDeg) {
+    if (maskDeg && typeof maskDeg === "object" && Array.isArray(maskDeg.profile) && maskDeg.profile.length) {
+      const profile = maskDeg.profile;
+      const n = profile.length;
+      const offset = Number(maskDeg.offsetDeg) || 0;
+      return function (azDeg) {
+        const az = (((Number(azDeg) || 0) % 360) + 360) % 360;
+        const x = (az / 360) * n;
+        const i0 = Math.floor(x);
+        const f = x - i0;
+        const a = profile[i0 % n];
+        const b = profile[(i0 + 1) % n];
+        return a + (b - a) * f + offset;
+      };
+    }
+    const flat = Number(maskDeg) || 0;
+    return function () {
+      return flat;
+    };
+  }
+
   function evaluate(date, lat, lon, maskDeg, panel) {
     const sky = observe(date);
     const view = siteView(sky, lat, lon);
-    const mask = maskDeg || 0;
+    const maskAt = maskResolver(maskDeg);
     const p = panel || { tiltDeg: 90, tracking: true, efficiency: 0.3 };
     const radius = view.sunRadiusDeg || 0.27;
-    const sunFrac = clamp01((view.sun.alt - mask + radius) / (2 * radius));
+    const maskSun = maskAt(view.sun.az);
+    const maskEarth = maskAt(view.earth.az);
+    const sunFrac = clamp01((view.sun.alt - maskSun + radius) / (2 * radius));
     const cosI = sunFrac > 0 ? incidence(view.sun.alt, view.sun.az, p) : 0;
     const eff = p.efficiency == null ? 0.3 : p.efficiency;
-    const stationAlt = Math.max.apply(null, view.stations.map((s) => s.alt));
+    // A station counts when it clears the skyline on its own bearing, so the
+    // one to report is the one with the most clearance, not the highest one.
+    let stationAlt = -Infinity;
+    let maskLink = 0;
+    let bestMargin = -Infinity;
+    for (const station of view.stations) {
+      const m = maskAt(station.az);
+      const margin = station.alt - m;
+      if (margin > bestMargin) {
+        bestMargin = margin;
+        stationAlt = station.alt;
+        maskLink = m;
+      }
+    }
     return {
       t: sky.date.getTime(),
       sky,
@@ -261,13 +301,16 @@
       earthRadius: view.earthRadiusDeg,
       sunFrac,
       lit: sunFrac > 0,
-      earthCenter: view.earth.alt > mask,
-      earthDisk: view.earth.alt + view.earthRadiusDeg > mask,
-      earthUp: view.earth.alt + view.earthRadiusDeg > mask,
-      stationUp: stationAlt > mask,
+      earthCenter: view.earth.alt > maskEarth,
+      earthDisk: view.earth.alt + view.earthRadiusDeg > maskEarth,
+      earthUp: view.earth.alt + view.earthRadiusDeg > maskEarth,
+      stationUp: bestMargin > 0,
       stationAlt,
-      dte: stationAlt > mask,
-      joint: sunFrac > 0 && stationAlt > mask,
+      dte: bestMargin > 0,
+      joint: sunFrac > 0 && bestMargin > 0,
+      maskSun,
+      maskEarth,
+      maskLink,
       irradiance: sky.irradiance,
       cosI,
       power: sky.irradiance * cosI * eff * sunFrac,
@@ -336,10 +379,14 @@
     const events = { sunset: null, sunrise: null, earthset: null, earthrise: null, linkDown: null, linkUp: null };
     if (samples.length < 2 || !Number.isFinite(fromMs) ||
         fromMs < samples[0].t || fromMs >= samples[samples.length - 1].t) return events;
+    // Each sample carries the mask that was actually resolved for the azimuth
+    // each body sat at, so use that and fall back to the argument.
+    const flat = Number(maskDeg) || 0;
+    const maskOf = (sample, key) => (Number.isFinite(sample[key]) ? sample[key] : flat);
     const channels = [
-      { value: (s) => s.sunAlt + s.sunRadius - maskDeg, down: "sunset", up: "sunrise" },
-      { value: (s) => s.earthAlt + s.earthRadius - maskDeg, down: "earthset", up: "earthrise" },
-      { value: (s) => s.stationAlt - maskDeg, down: "linkDown", up: "linkUp" }
+      { value: (s) => s.sunAlt + s.sunRadius - maskOf(s, "maskSun"), down: "sunset", up: "sunrise" },
+      { value: (s) => s.earthAlt + s.earthRadius - maskOf(s, "maskEarth"), down: "earthset", up: "earthrise" },
+      { value: (s) => s.stationAlt - maskOf(s, "maskLink"), down: "linkDown", up: "linkUp" }
     ];
     let index = 0;
     while (samples[index + 1].t <= fromMs) index++;
@@ -441,14 +488,16 @@
     const t0 = start instanceof Date ? start.getTime() : new Date(start).getTime();
     const step = 30 * 60 * 1000;
     const limit = t0 + 400 * 86400000;
+    const maskAt = maskResolver(maskDeg);
+    const clearance = (look) => look.alt - maskAt(look.az);
     let prevT = t0;
     let prev = atSite(new Date(t0), lat, lon);
-    let prevAlt = which === "earth" ? prev.earth.alt : prev.sun.alt;
+    let prevAlt = clearance(which === "earth" ? prev.earth : prev.sun);
     for (let t = t0 + step; t <= limit; t += step) {
       const cur = atSite(new Date(t), lat, lon);
-      const alt = which === "earth" ? cur.earth.alt : cur.sun.alt;
-      const before = prevAlt - maskDeg;
-      const after = alt - maskDeg;
+      const alt = clearance(which === "earth" ? cur.earth : cur.sun);
+      const before = prevAlt;
+      const after = alt;
       const rising = before <= 0 && after > 0;
       const setting = before > 0 && after <= 0;
       if ((wantRise && rising) || (!wantRise && setting)) {
@@ -457,7 +506,7 @@
         for (let k = 0; k < 24; k++) {
           const m = 0.5 * (a + b);
           const mid = atSite(new Date(m), lat, lon);
-          const mAlt = (which === "earth" ? mid.earth.alt : mid.sun.alt) - maskDeg;
+          const mAlt = clearance(which === "earth" ? mid.earth : mid.sun);
           if ((mAlt > 0) === (after > 0)) b = m;
           else a = m;
         }
@@ -544,6 +593,7 @@
     atSite,
     evaluate,
     incidence,
+    maskResolver,
     sampleMission,
     summarize,
     eventsFromSamples,
