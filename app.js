@@ -133,11 +133,13 @@
   var builtin = window.LUNAR_SITES || [];
   var groups = window.LUNAR_GROUPS || [];
   var custom = loadCustom();
+  var terrain = window.LUNAR_TERRAIN || null;
 
   var state = {
     selected: ["mouton"],
     landingMs: 0,
     durationHours: 708.734,
+    terrain: !!terrain,
     maskDeg: 0,
     panelMode: "vertical",
     tiltDeg: 60,
@@ -173,6 +175,28 @@
     return state.durationHours * HOUR;
   }
 
+  /* ---------- horizon mask ---------- */
+
+  /* The LOLA profile for a site, or null. Only the catalogue's south-polar
+     sites have one: custom coordinates and everything outside the product fall
+     back to the uniform mask. */
+  function terrainFor(site) {
+    if (!state.terrain || !terrain || !terrain.sites || !site) return null;
+    return terrain.sites[site.id] || null;
+  }
+
+  function terrainCount() {
+    return terrain && terrain.sites ? Object.keys(terrain.sites).length : 0;
+  }
+
+  /* What goes to the engine. With a profile the slider becomes an offset on top
+     of the real skyline; without one it is the whole mask. */
+  function maskFor(site) {
+    var profile = terrainFor(site);
+    if (!profile) return state.maskDeg;
+    return { profile: profile.profile, offsetDeg: state.maskDeg };
+  }
+
   function panelSpec() {
     var eff = state.efficiencyPct / 100;
     if (state.panelMode === "vertical") return { tiltDeg: 90, tracking: true, azimuthDeg: 0, efficiency: eff };
@@ -192,6 +216,7 @@
   function cacheKey(site, panel) {
     return [
       site.id, site.lat, site.lon, state.landingMs, missionMs(), state.maskDeg,
+      terrainFor(site) ? "lola" : "flat",
       panel.tiltDeg, panel.tracking ? 1 : 0, panel.azimuthDeg, panel.efficiency
     ].join("|");
   }
@@ -200,7 +225,7 @@
     var key = cacheKey(site, panel);
     if (cache[key]) return cache[key];
     var samples = LunarEph.sampleMission(new Date(state.landingMs), missionMs(), site.lat, site.lon, {
-      maskDeg: state.maskDeg,
+      maskDeg: maskFor(site),
       panel: panel
     });
     var entry = { samples: samples, summary: LunarEph.summarize(samples) };
@@ -216,10 +241,16 @@
 
   /* ---------- events from samples ---------- */
 
+  /* Samples carry the mask that was resolved for the azimuth each body sat at,
+     which is the only correct threshold once the mask varies with azimuth. */
+  function maskOf(sample, key, fallback) {
+    return isFinite(sample[key]) ? sample[key] : fallback;
+  }
+
   function channel(sample, which, mask) {
-    if (which === "sun") return sample.sunAlt + sample.sunRadius - mask;
-    if (which === "earth") return sample.earthAlt + sample.earthRadius - mask;
-    return sample.stationAlt - mask;
+    if (which === "sun") return sample.sunAlt + sample.sunRadius - maskOf(sample, "maskSun", mask);
+    if (which === "earth") return sample.earthAlt + sample.earthRadius - maskOf(sample, "maskEarth", mask);
+    return sample.stationAlt - maskOf(sample, "maskLink", mask);
   }
 
   var EVENT_KEYS = ["sunset", "sunrise", "earthset", "earthrise", "linkDown", "linkUp"];
@@ -296,16 +327,19 @@
         samples: mission.samples,
         summary: mission.summary,
         site: site,
-        now: LunarEph.evaluate(new Date(state.playheadMs), site.lat, site.lon, state.maskDeg, panel)
+        terrain: terrainFor(site),
+        now: LunarEph.evaluate(new Date(state.playheadMs), site.lat, site.lon, maskFor(site), panel)
       };
     }).filter(Boolean);
 
+    var lead = sites.length ? sites[0].terrain : null;
     return {
       sites: sites,
       primaryId: sites.length ? sites[0].id : null,
       playheadMs: state.playheadMs,
       landingMs: state.landingMs,
       maskDeg: state.maskDeg,
+      maskProfile: lead ? lead.profile : null,
       mapMode: state.mapMode
     };
   }
@@ -393,7 +427,7 @@
   function renderReadout(model) {
     var primary = model.sites[0];
     var now = primary.now;
-    var clearance = now.earthAlt + now.earthRadius - state.maskDeg;
+    var clearance = now.earthAlt + now.earthRadius - maskOf(now, "maskEarth", state.maskDeg);
     var notes = [];
     if (!window.LunarViz) notes.push("viz.js is not loaded yet.");
     if (now.earthDisk && !now.earthCenter) {
@@ -472,6 +506,25 @@
     return missionFor(site, alt).summary;
   }
 
+  /* The sample where the solar limb came closest to the skyline. Worth saying
+     out loud, because "the Sun never sets" can be true by a quarter of a degree. */
+  function tightestSun(entry) {
+    var best = null;
+    for (var i = 0; i < entry.samples.length; i++) {
+      var sample = entry.samples[i];
+      var margin = channel(sample, "sun", state.maskDeg);
+      if (!best || margin < best.margin) {
+        best = {
+          margin: margin,
+          timeMs: sample.t,
+          alt: sample.sunAlt,
+          mask: maskOf(sample, "maskSun", state.maskDeg)
+        };
+      }
+    }
+    return best;
+  }
+
   function renderInsights(model) {
     var primary = model.sites[0];
     var s = primary.summary;
@@ -479,8 +532,28 @@
     var site = primary.site;
     var lines = [];
 
+    var prof = primary.terrain;
     lines.push("<b>" + esc(site.name) + "</b> over " + hours(state.durationHours) + " from " +
-      utcStamp(state.landingMs) + ", with the horizon mask at " + deg(state.maskDeg, 1) + ".");
+      utcStamp(state.landingMs) + ", against " + (prof
+        ? "the LOLA skyline" + (Math.abs(state.maskDeg) > 0.05 ? " raised " + deg(state.maskDeg, 1) : "")
+        : "a uniform horizon mask of " + deg(state.maskDeg, 1)) + ".");
+
+    if (prof) {
+      lines.push("The real skyline here runs " + deg(prof.min, 1) + " to " + deg(prof.max, 1) +
+        " around the compass, from a site " + (prof.h0 >= 0 ? prof.h0 + " m above" : -prof.h0 + " m below") +
+        " the 1,737.4 km datum. " +
+        (prof.max - prof.min > 6
+          ? "That spread is the whole point: one number could not stand in for it."
+          : "A fairly even skyline, so a uniform mask is not a bad approximation here."));
+    }
+
+    if (s.sunlitFrac > 0.995) {
+      var tight = tightestSun(primary);
+      lines.push("The Sun never sets here over this window, but it is not comfortable: the closest it comes to the skyline is " +
+        deg(tight.margin, 2) + " of clearance, on " + utcStamp(tight.timeMs) + ", with the Sun at " +
+        deg(tight.alt, 1) + " altitude and the skyline at " + deg(tight.mask, 1) +
+        " on that bearing. A ridge this tool cannot see would end it.");
+    }
 
     if (now.subSolarLat < -0.3) {
       lines.push("The subsolar latitude is " + deg(now.subSolarLat, 2) +
@@ -532,7 +605,14 @@
       }
     }
 
-    lines.push('<span class="muted">Smooth 1,737.4 km sphere, no terrain horizon. The mask is a question, not a LOLA product.</span>');
+    if (prof) {
+      lines.push('<span class="muted">Skyline from ' + esc(terrain.meta.product) + ', LOLA at ' +
+        terrain.meta.resolutionM + " m per pixel, rays to " + terrain.meta.rayKm +
+        " km in " + terrain.meta.bins + " directions. Past that the datum sphere is assumed, which is the " +
+        deg(prof.floor, 1) + " floor. Sun and Earth positions are still airless geometry on a sphere.</span>");
+    } else {
+      lines.push('<span class="muted">Smooth 1,737.4 km sphere with a uniform mask. No LOLA profile for this site, so the mask is a question, not a measurement.</span>');
+    }
 
     el("insights").innerHTML = '<div class="block-title">Reading</div>' + lines.map(function (line) {
       return "<p>" + line + "</p>";
@@ -605,6 +685,7 @@
       renderPanelHint(model);
     }
     if (!options.light) {
+      syncTerrainInputs();
       renderFilters();
       renderSiteList();
       renderChips();
@@ -807,7 +888,7 @@
     window.setTimeout(function () {
       try {
         state.windows = LunarEph.scanWindows(site.lat, site.lon, missionMs(), new Date(state.landingMs), {
-          maskDeg: state.maskDeg,
+          maskDeg: maskFor(site),
           panel: panelSpec()
         });
       } catch (err) {
@@ -827,6 +908,7 @@
     params.set("t", utcIso(state.landingMs));
     params.set("d", String(state.durationHours));
     params.set("m", String(state.maskDeg));
+    params.set("lola", state.terrain ? "1" : "0");
     params.set("p", state.panelMode);
     params.set("tilt", String(state.tiltDeg));
     params.set("trk", state.tracking ? "1" : "0");
@@ -873,6 +955,8 @@
     }
     var m = parseFloat(params.get("m"));
     if (isFinite(m)) state.maskDeg = clamp(m, -4, 15);
+    var lola = params.get("lola");
+    if (lola === "0" || lola === "1") state.terrain = !!terrain && lola === "1";
     var p = params.get("p");
     if (p === "vertical" || p === "horizontal" || p === "tilt") state.panelMode = p;
     var tilt = parseFloat(params.get("tilt"));
@@ -888,6 +972,30 @@
 
   /* ---------- controls ---------- */
 
+  function syncTerrainInputs() {
+    var box = el("terrain");
+    box.checked = state.terrain;
+    box.disabled = !terrain;
+    var profile = terrainFor(primarySite());
+    el("mask-label").textContent = profile ? "Raise or lower the skyline" : "Terrain clearance";
+    var note;
+    if (!terrain) {
+      note = "terrain.js is not loaded, so the horizon is a uniform mask.";
+    } else if (!state.terrain) {
+      note = "Off: one mask angle in every direction, on a smooth 1,737.4 km sphere.";
+    } else if (profile) {
+      note = terrain.meta.product + ": LOLA at " + terrain.meta.resolutionM +
+        " m per pixel, skyline measured to " + terrain.meta.rayKm + " km in " +
+        terrain.meta.bins + " directions. This site runs " + deg(profile.min, 1) +
+        " to " + deg(profile.max, 1) + ".";
+    } else {
+      note = "No LOLA profile for this site. The product covers " +
+        Math.abs(terrain.meta.minLat) + "\u00b0S to the pole, which is " + terrainCount() +
+        " of the catalogue's sites, so this one falls back to the uniform mask.";
+    }
+    el("terrain-note").textContent = note;
+  }
+
   function syncPanelInputs() {
     var effective = panelSpec();
     el("panel-mode").value = state.panelMode;
@@ -898,6 +1006,7 @@
     el("mask").value = String(state.maskDeg);
     el("duration").value = String(state.durationHours);
     el("map-mode").value = state.mapMode;
+    syncTerrainInputs();
 
     var fixed = state.panelMode === "tilt";
     el("tilt").disabled = !fixed;
@@ -1004,6 +1113,13 @@
       saveCustom();
       el("custom-name").value = "";
       selectOnly(id);
+    });
+
+    el("terrain").addEventListener("change", function () {
+      state.terrain = !!terrain && el("terrain").checked;
+      syncTerrainInputs();
+      dropCache();
+      recompute();
     });
 
     el("mask").addEventListener("input", function () {

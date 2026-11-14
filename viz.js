@@ -87,11 +87,32 @@
 
   /* ---------------- horizon ---------------- */
 
+  /* The skyline elevation at one azimuth, degrees. profile holds one value per
+     bin, bin 0 at north, clockwise; bins are interpolated. Kept local so these
+     views stay free of any dependency on the ephemeris. */
+  function maskAt(model, azDeg) {
+    const offset = model.maskDeg || 0;
+    const profile = model.maskProfile;
+    if (!profile || !profile.length) return offset;
+    const n = profile.length;
+    const az = (((azDeg || 0) % 360) + 360) % 360;
+    const x = (az / 360) * n;
+    const i0 = Math.floor(x);
+    const f = x - i0;
+    const a = profile[i0 % n];
+    const b = profile[(i0 + 1) % n];
+    return a + (b - a) * f + offset;
+  }
+
   function horizonRange(model) {
     const mask = model.maskDeg || 0;
     let lo = Math.min(0, mask);
     let hi = Math.max(0, mask);
     let any = false;
+    for (const v of model.maskProfile || []) {
+      lo = Math.min(lo, v + mask);
+      hi = Math.max(hi, v + mask);
+    }
     for (const site of model.sites || []) {
       for (const s of site.samples || []) {
         lo = Math.min(lo, s.sunAlt - s.sunRadius, s.earthAlt - s.earthRadius);
@@ -133,6 +154,20 @@
     return r;
   }
 
+  /* The skyline across the whole plot, left to right, in css pixels.
+     Sampled every half degree of display azimuth, which is finer than the
+     profile's own bins. */
+  function skylinePath(model, x, y, pw, m) {
+    const pts = [];
+    const stepDeg = 0.5;
+    for (let d = 0; d <= 360 + 1e-9; d += stepDeg) {
+      const az = (d + 180) % 360;
+      const el = maskAt(model, az);
+      pts.push({ x: Math.min(m.left + pw, x(d)), y: y(el) });
+    }
+    return pts;
+  }
+
   function drawHorizon(canvas, model) {
     const { ctx, w, h } = setup(canvas);
     const m = { left: 46, right: 14, top: 24, bottom: 28 };
@@ -148,7 +183,20 @@
 
     // ground: translucent so bodies below the horizon stay readable
     const y0 = y(0);
-    if (y0 < m.top + ph) {
+    const skyline = model.maskProfile && model.maskProfile.length ? skylinePath(model, x, y, pw, m) : null;
+    if (skyline) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(skyline[0].x, skyline[0].y);
+      for (const p of skyline) ctx.lineTo(p.x, p.y);
+      ctx.lineTo(m.left + pw, m.top + ph);
+      ctx.lineTo(m.left, m.top + ph);
+      ctx.closePath();
+      ctx.clip();
+      ctx.fillStyle = C.ground;
+      ctx.fillRect(m.left, m.top, pw, ph);
+      ctx.restore();
+    } else if (y0 < m.top + ph) {
       ctx.fillStyle = C.ground;
       ctx.fillRect(m.left, Math.max(m.top, y0), pw, m.top + ph - Math.max(m.top, y0));
     }
@@ -185,27 +233,52 @@
       text(ctx, c.lab, xx, h - 10, { align: "center", color: C.muted, size: 11 });
     }
 
-    // horizon: a hard line, no atmosphere
-    ctx.strokeStyle = C.groundEdge;
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(m.left, y0);
-    ctx.lineTo(m.left + pw, y0);
-    ctx.stroke();
+    if (skyline) {
+      // the sphere horizon stays as a faint reference, so the terrain reads as
+      // a departure from it
+      ctx.save();
+      ctx.strokeStyle = C.faint;
+      ctx.setLineDash([2, 5]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(m.left, y0);
+      ctx.lineTo(m.left + pw, y0);
+      ctx.stroke();
+      ctx.restore();
+      text(ctx, "sphere 0°", m.left + 4, y0 - 4, { mono: true, color: C.faint, size: 9 });
 
-    // mask, dashed
-    const ym = y(mask);
-    ctx.save();
-    ctx.strokeStyle = C.warn;
-    ctx.setLineDash([5, 4]);
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(m.left, ym);
-    ctx.lineTo(m.left + pw, ym);
-    ctx.stroke();
-    ctx.restore();
-    if (Math.abs(mask) > 1e-9) {
-      text(ctx, "mask " + mask.toFixed(1) + "°", m.left + pw - 4, ym - 4, { mono: true, align: "right", color: C.warn, size: 10 });
+      ctx.save();
+      ctx.strokeStyle = C.groundEdge;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      skyline.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.stroke();
+      ctx.restore();
+      const label = "LOLA skyline" + (Math.abs(mask) > 1e-9 ? " + " + mask.toFixed(1) + "°" : "");
+      text(ctx, label, m.left + pw - 4, m.top + ph - 6, { mono: true, align: "right", color: C.groundEdge, size: 10 });
+    } else {
+      // horizon: a hard line, no atmosphere
+      ctx.strokeStyle = C.groundEdge;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(m.left, y0);
+      ctx.lineTo(m.left + pw, y0);
+      ctx.stroke();
+
+      // mask, dashed
+      const ym = y(mask);
+      ctx.save();
+      ctx.strokeStyle = C.warn;
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(m.left, ym);
+      ctx.lineTo(m.left + pw, ym);
+      ctx.stroke();
+      ctx.restore();
+      if (Math.abs(mask) > 1e-9) {
+        text(ctx, "mask " + mask.toFixed(1) + "°", m.left + pw - 4, ym - 4, { mono: true, align: "right", color: C.warn, size: 10 });
+      }
     }
 
     // trails
@@ -310,6 +383,11 @@
         t1 = Math.max(t1, s.t);
         lo = Math.min(lo, s.sunAlt, s.earthAlt);
         hi = Math.max(hi, s.sunAlt, s.earthAlt);
+        if (Number.isFinite(s.maskSun)) {
+          // the threshold has to stay on screen or the crossings read wrong
+          lo = Math.min(lo, s.maskSun);
+          hi = Math.max(hi, s.maskSun);
+        }
         any = true;
       }
     }
@@ -371,16 +449,32 @@
     ctx.moveTo(m.left, y0);
     ctx.lineTo(m.left + pw, y0);
     ctx.stroke();
+    const primaryIdx = Math.max(0, sites.findIndex((s) => s.id === model.primaryId));
+
+    // The threshold the Sun actually crosses. With a terrain profile that is
+    // the skyline on the Sun's own bearing, which moves through the mission,
+    // so plot the series the samples carry rather than one flat line.
+    const lead = sites[primaryIdx];
+    const varying = lead && (lead.samples || []).some((s) => Number.isFinite(s.maskSun));
     ctx.save();
     ctx.strokeStyle = C.warn;
     ctx.setLineDash([5, 4]);
-    ctx.beginPath();
-    ctx.moveTo(m.left, y(mask));
-    ctx.lineTo(m.left + pw, y(mask));
-    ctx.stroke();
+    ctx.lineWidth = 1.2;
+    if (varying) {
+      ctx.beginPath();
+      lead.samples.forEach((s, i) => {
+        const py = y(Number.isFinite(s.maskSun) ? s.maskSun : mask);
+        if (i === 0) ctx.moveTo(x(s.t), py);
+        else ctx.lineTo(x(s.t), py);
+      });
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(m.left, y(mask));
+      ctx.lineTo(m.left + pw, y(mask));
+      ctx.stroke();
+    }
     ctx.restore();
-
-    const primaryIdx = Math.max(0, sites.findIndex((s) => s.id === model.primaryId));
 
     // primary sun filled between the curve and the horizon
     const prim = sites[primaryIdx];

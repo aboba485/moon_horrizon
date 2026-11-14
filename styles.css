@@ -227,6 +227,8 @@ input[type="range"] { width: 100%; accent-color: var(--sun); }
 .chips button { padding: 4px 8px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 12px; }
 .chips button:hover { color: var(--ink); }
 .help { color: var(--faint); font-size: 12px; margin: 0; }
+.stack label.check { flex-direction: row; align-items: center; gap: 8px; }
+.stack label.check input[type="checkbox"] { padding: 0; accent-color: var(--sun); }
 
 .controls {
   display: flex;

@@ -58,8 +58,10 @@
       </form>
 
       <div class="stack">
-        <div class="block-title">Horizon mask</div>
-        <div class="row-between"><span>Terrain clearance</span><span class="mono" id="mask-read">0.0°</span></div>
+        <div class="block-title">Horizon</div>
+        <label class="check"><input id="terrain" type="checkbox" checked> Use the real LOLA skyline</label>
+        <p class="help" id="terrain-note"></p>
+        <div class="row-between"><span id="mask-label">Terrain clearance</span><span class="mono" id="mask-read">0.0°</span></div>
         <input id="mask" type="range" min="-4" max="15" step="0.1" value="0" aria-label="Horizon mask in degrees">
         <div class="chips" id="mask-presets">
           <button type="button" data-mask="-1.5">High peak −1.5°</button>
@@ -67,7 +69,7 @@
           <button type="button" data-mask="2">Clearance +2°</button>
           <button type="button" data-mask="8">Crater wall +8°</button>
         </div>
-        <p class="help">The Moon has no air, so the geometric horizon is sharp. Real south-pole skylines are crater rims, not this flat mask. Raise it to ask “what if the terrain blocks the first few degrees?”</p>
+        <p class="help">The Moon has no air, so the geometric horizon is sharp. With the LOLA skyline on, the slider raises or lowers that measured profile. With it off, the slider <em>is</em> the horizon, uniform in every direction.</p>
 
         <div class="block-title">Solar array</div>
         <label>Arrangement
@@ -158,7 +160,8 @@
         <p>Sun and Earth directions use Astronomy Engine for the vectors and the IAU lunar pole and prime meridian for the Mean Earth frame. Altitude is airless and topocentric on a 1,737.4 km sphere. Checked against JPL Horizons apparent azimuth and elevation: the test cases agree to better than 0.01°.</p>
         <p>A body is “up” for sunlight when any of the solar disk clears the mask. Power is the solar constant scaled to the Moon–Sun distance, times the cosine of the incidence angle on the panel you picked, times cell efficiency, times the lit fraction of the disk. One square metre, no dust, no mutual shading.</p>
         <p>Direct-to-Earth means a geometric line of sight from the site to Goldstone, Madrid, or Canberra. It is not a schedule, a link budget, or a terrain mask. Earth-disk visibility is separate: the limb clears the mask even when the center of Earth is still below it. That margin is about one degree, and at the south pole one degree is the whole story.</p>
-        <p>There is no LOLA horizon in this tool. Peaks of eternal light and crater floors can disagree with a smooth sphere by many degrees. Use the mask as a question, not as a flight prediction.</p>
+        <p>The skyline is real where the data reaches. LDEM_75S_120M, the LOLA polar DEM at 120 m per pixel, is walked outward from each site along great circles to 100 km in 360 directions, keeping the highest elevation angle each ray ever reaches. Past the edge of the product the profile falls back to the horizon of the 1,737.4 km datum sphere seen from the site's own elevation. Sites north of 79°S have no profile and use the uniform mask.</p>
+        <p>What the skyline still leaves out: azimuth is binned at one degree, so a knife-edge ridge is smoothed; rays stop at 100 km, so a far mountain beyond that is invisible; and there is no self-shadowing, no scattered light from nearby slopes, and no thermal model. Treat a half-degree margin as a question for a real terrain study, not as an answer.</p>
       </details>
     </footer>
   </div>
@@ -166,6 +169,7 @@
   <script src="sites.js"></script>
   <script src="ephemeris.js"></script>
   <script src="viz.js"></script>
+  <script src="terrain.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
