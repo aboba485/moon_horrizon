@@ -4,7 +4,7 @@ A landing-site navigator for the Moon, built for the NASA Space Apps Challenge 2
 
 Pick a site and a landing date. The tool shows where the Sun and Earth sit relative to the local horizon through a whole mission, and turns that geometry into the two numbers a planner actually trades: how much solar energy the site gives, and how much of the time a direct radio path to Earth exists. Up to three sites can be compared on one landing epoch, one mission length, and one horizon mask, so the only difference between them is the place and the date.
 
-The south pole is the interesting case. The Moon's spin axis is about 1.54° from the ecliptic pole, so the subsolar latitude stays inside roughly ±1.6°. At a polar site the Sun circles the horizon once per lunar day and never climbs high, and Earth is nearly fixed in the sky, wobbling by the libration of about ±8°. A degree of elevation is the whole mission there, which is why the readout quotes tenths of a degree and the horizon mask is adjustable.
+The south pole is the interesting case. The Moon's spin axis is about 1.54° from the ecliptic pole, so the subsolar latitude stays inside roughly ±1.6°. At a polar site the Sun circles the horizon once per lunar day and never climbs high, and Earth is nearly fixed in the sky, wobbling by the libration of about ±8°. A degree of elevation is the whole mission there, which is why the readout quotes tenths of a degree and the horizon is taken from a real LOLA elevation model rather than assumed flat.
 
 ## Running it
 
@@ -16,12 +16,15 @@ cd moon_horrizon
 open index.html        # or double-click it
 ```
 
-Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `ephemeris.js`, `viz.js`, `app.js`.
+Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `ephemeris.js`, `viz.js`, `terrain.js`, `app.js`.
 
 - `ephemeris.js` is the sky math (`window.LunarEph`).
 - `sites.js` is the site catalogue (`window.LUNAR_SITES`, `window.LUNAR_GROUPS`).
 - `viz.js` draws the horizon, the chart, and the map (`window.LunarViz`).
+- `terrain.js` is the measured LOLA horizon profiles (`window.LUNAR_TERRAIN`), generated offline by `tools/`.
 - `app.js` is the shell: state, controls, metrics, and the text.
+
+`terrain.js` is a script rather than a JSON file on purpose: `fetch()` of a local file is blocked over `file://`, and opening `index.html` by double-clicking it has to keep working.
 
 All times in the interface are UTC and labelled as such. The landing date and time inputs are UTC, not the local zone of the machine.
 
@@ -48,7 +51,7 @@ Worst angular error on those cases: **0.007°**. The Moon has no atmosphere, so 
 
 ## What the numbers mean
 
-**Horizon mask.** One number, in degrees, standing in for local terrain. 0 is the smooth sphere. A positive mask asks "what if the skyline blocks the first few degrees?" A negative mask asks the opposite, as if the site sits on a peak above its surroundings. It is uniform in azimuth, which no real site is.
+**Horizon.** Two modes. With the LOLA skyline on, the horizon is a measured elevation angle for every one of 360 azimuths, different in every direction, and the slider raises or lowers that whole profile. With it off, the horizon is a single number in every direction: 0 is the smooth sphere, a positive mask asks "what if the skyline blocks the first few degrees?", a negative mask asks the opposite, as if the site sits on a peak above its surroundings. See [The LOLA skyline](#the-lola-skyline).
 
 **Sunlight.** A site is lit when any part of the solar disk clears the mask. The lit fraction of the disk is interpolated across the disk radius, so a part-risen Sun counts partially.
 
@@ -62,7 +65,7 @@ Output is electrical watts per square metre of cells. There is no dust, no struc
 
 Array arrangement matters more than anything else at a polar site. Over one lunar day from 2026-11-14 at Mons Mouton with a 0° mask and 30% cells, a vertical array that tracks the Sun's azimuth collects about 177 kWh/m², while the same cells lying flat collect about 12 kWh/m². A Sun that is 1° above the horizon arrives nearly edge-on to a flat panel.
 
-**Direct to Earth (DTE).** A geometric line of sight from the site to a Deep Space Network complex: Goldstone, Madrid, or Canberra. The station must itself clear the mask as seen from the site, which is stricter and more correct than asking whether the centre of Earth is up. Station positions are complex-level coordinates, not specific antennas. This is not a schedule, not a link budget, and not a terrain mask.
+**Direct to Earth (DTE).** A geometric line of sight from the site to a Deep Space Network complex: Goldstone, Madrid, or Canberra. The station must itself clear the horizon on its own bearing as seen from the site, which is stricter and more correct than asking whether the centre of Earth is up. Station positions are complex-level coordinates, not specific antennas. This is not a schedule, not a link budget, and not a terrain mask.
 
 **Earth disk versus Earth centre.** Earth is about 1.9° across as seen from the Moon, so its upper limb can be above the horizon while its centre is still below. At Mons Mouton on 2026-11-14 00:00 UTC the centre of Earth is at −0.805° and the limb is essentially on the horizon. The readout reports the limb clearance for that reason.
 
@@ -78,8 +81,40 @@ The Artemis III candidate-region points are **representative published locations
 
 Landed missions (Apollo, CLPS, Chandrayaan-3, SLIM, the Chang'e series) use reported touchdown coordinates. Custom coordinates can be entered directly for any point on the sphere.
 
+## The LOLA skyline
+
+A single mask angle cannot describe a south-polar site. The horizon there is crater rims and massifs, and it is different in every direction, so `terrain.js` ships a measured horizon profile for each of the 17 catalogue sites south of 79°S.
+
+**Source.** `LDEM_75S_120M` from the LOLA Gridded Data Record (LRO-L-LOLA-4-GDR-V1.0), the south polar DEM covering 75°S to the pole at 120 m per pixel, 7624 × 7624 16-bit samples, heights relative to a reference radius of 1737.4 km, in the same Mean Earth / polar axis frame the ephemeris uses. The raster is 110 MB and is not committed. `tools/fetch-lola.sh` downloads it and `tools/lola-horizon.mjs` reduces it to the 44 kB `terrain.js`.
+
+**Method.** From each site, walk a great circle outward in each of 360 azimuths, sampling the DEM along the way out to 100 km. At every sample the exact spherical elevation angle of that point as seen from the site is
+
+```
+el = atan2((R + h)·cos δ − (R + h₀), (R + h)·sin δ)
+```
+
+where δ is the angular distance walked, h₀ the site height and h the sampled height. The profile keeps the largest value any sample on that ray reaches, which is the skyline. Where a ray runs off the edge of the product the profile falls back to the horizon of the datum sphere seen from the site's own elevation, `−acos(R / (R + h₀))`. Mons Mouton sits 6443 m up, so its floor is −4.93°; a site at the datum gets 0°.
+
+The walk is done in 3D unit vectors, `p(s) = p₀·cos δ + d·sin δ` with `d = north·cos A + east·sin A`, and the polar stereographic projection back to pixels is `x = 2R·u_y/(1 − u_z)`, so there is no trigonometry in the inner loop.
+
+**Validation.** The projection's sign convention is not documented in the files the archive still serves, so it was determined by scoring all four `(±x, ±y)` combinations against six craters with published coordinates; only one puts all six at the bottom of a depression, and it wins by an order of magnitude. The resulting geometry was then checked against published measurements:
+
+| check | measured here | published |
+| --- | --- | --- |
+| Shackleton depth, rim to floor | 4026 m | ~4.2 km |
+| Shackleton rim radius | 9.7–10.7 km | ~10.5 km |
+| Shackleton rim angle from the floor centre | 21.2°, uniform in azimuth | 21.8° |
+| Malapert Massif summit above datum | +4758 m | ~5 km |
+| Shoemaker / Cabeus / Faustini floors | −3932 / −3286 / −2767 m | all deep PSRs |
+
+A circular rim at the right radius *and* the right elevation angle cannot come out of a wrong projection.
+
+**What it changes.** Shackleton crater goes from 100% sunlit on a smooth sphere to 48% against its own rim, which is the physically obvious answer and the one a smooth sphere cannot give. Slater Plain, a plain, barely moves: 74.5% to 60.4%. Direct-to-Earth generally falls, because Earth sits within a degree or two of the horizon and the skyline is now in the way on most bearings.
+
+And one result worth reading carefully. Mons Mouton holds the Sun for an entire lunar day from 2026-11-14 — but the closest the solar limb comes to the skyline is **0.43°**, on 2026-12-08, with the Sun at −2.9° altitude and the southern skyline fallen to −3.0°. That margin is why the site is an Artemis III candidate, and it is also why "100% sunlight" should never be quoted without it. The tool says so in the reading panel.
+
 ## Limits
 
-There is no LOLA digital elevation model and no real horizon profile in this tool. The Moon here is a smooth sphere plus one adjustable mask angle. Real south-polar skylines are crater rims and massifs that move the local horizon by many degrees and vary with azimuth, so a smooth-sphere result can call a crater floor sunlit when it is in shadow, or miss a peak of near-eternal light. Thermal behaviour, dust, communications link budgets, landing hazards, and traverse planning are all outside the model.
+The skyline is binned at one degree of azimuth, so a knife-edge ridge is smoothed. Rays stop at 100 km, so a mountain beyond that is invisible. Sites north of 79°S have no profile at all and fall back to the uniform mask. There is no self-shadowing of local slopes, no light scattered from nearby terrain, and no thermal model. Dust, link budgets, landing hazards, and traverse planning are all outside the model.
 
 Use it to compare sites and dates and to understand why polar geometry is hard. Do not use it as a flight product.
