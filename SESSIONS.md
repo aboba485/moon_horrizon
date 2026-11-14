@@ -35,7 +35,7 @@ The challenge explicitly allows:
 - Animation or a timeline across a lunar day
 - Language that works for a planner and for a student
 
-Encouraged, not required: LOLA terrain horizons, libration, the fact that the Moon has no air so there is no refraction twilight.
+The longer brief (background, objectives, and potential considerations) does not change the product. Libration and the Moon’s changing distance are already in the ephemeris, and the prompts require them to be shown. The year-long date scan and a nearby-site delta stay required, because slipped launches and small site moves are the planning case. Solar elevation is the thermal proxy. Do not invent temperatures. LOLA, DEMs, and a 3D Moon stay out of scope. There is no atmosphere and no refraction. The horizon stays geometric, with a uniform mask the user can set.
 
 Official data pointers: QuickMap, Moon Trek, Horizons. Horizons was used as the acceptance test for the engine already in this repo.
 
@@ -389,6 +389,8 @@ Team rules, all three sessions:
 6. The other sessions will push while you work. Pull again before you call the task done. Code to the contract in this prompt even if their files are not on main yet. When their files appear, pull them. Do not rewrite them.
 7. No build step, no framework, and no new astronomy library.
 
+Challenge fit. The product is rapid comparison of sites and of dates for Sun position, Earth position, power, and direct-to-Earth. Libration and the Moon's changing distance are already in the ephemeris. Keep them. Do not replace them with a flat model. Topography and 3D terrain are optional in the brief and out of scope. Keep the uniform horizon mask and say it is not a LOLA horizon. Do not download DEMs or build a 3D moon. No atmosphere and no refraction. The horizon is geometric. Write for a planner and for a student on the same screen: numbers a planner can use, and one plain sentence about why the south pole is different from Apollo.
+
 Your files are ephemeris.js, sites.js, test/, and a new ENGINE.md. Do not edit index.html, styles.css, app.js, viz.js, or viz-demo.html. Sessions 2 and 3 are writing those against the API below. If you change a return field, their work breaks.
 
 The astronomy is already implemented and checked. On 2026-11-14 00:00 UTC at lat −85.416, lon 31.851, JPL Horizons airless apparent place is Sun az 94.875 el +1.171 and Earth az 327.030 el −0.805. This code returns 94.880 / +1.170 and 327.029 / −0.805. Seven other cases (south pole on 2026-06-21, Apollo 11, Slater Plain, the far-side equator) all agree within 0.007°. Subsolar latitude through 2026 stays inside ±1.59°. Keep that.
@@ -408,7 +410,7 @@ panel object: { tiltDeg, tracking, azimuthDeg, efficiency }.
 Sites live on window.LUNAR_SITES with id, name, short, group, program, status, lat, lon, note. Do not invent coordinates. Faustini Rim A and Connecting Ridge Extension are intentionally absent.
 
 Your work:
-1. Read ephemeris.js and sites.js. Write ENGINE.md that documents the API, units, the Horizons table above, the power definitions, and the limits: spherical Moon, uniform mask, no LOLA, DSN is geometric line of sight to Goldstone 35.2471/−116.7933, Madrid 40.4272/−4.2508, Canberra −35.3985/148.9819, complex-level not a specific dish.
+1. Read ephemeris.js and sites.js. Write ENGINE.md that documents the API, units, the Horizons table above, the power definitions, and the limits: spherical Moon, uniform mask, no LOLA, DSN is geometric line of sight to Goldstone 35.2471/−116.7933, Madrid 40.4272/−4.2508, Canberra −35.3985/148.9819, complex-level not a specific dish. State that libration is already inside the IAU pole series, visible as subEarthLat and subEarthLon, and that the tool does not model terrain.
 2. Add LunarEph.eventsFromSamples(samples, fromMs, maskDeg). It must not call the ephemeris. Walk the samples. Interpolate the crossing time between bracketing samples.
    Return { sunset, sunrise, earthset, earthrise, linkDown, linkUp }.
    Each value is either null (no crossing after fromMs inside the samples) or { t: milliseconds, kind }.
@@ -452,6 +454,8 @@ Team rules, all three sessions:
 6. The other sessions will push while you work. Pull again before you call the task done. Code to the contract in this prompt even if their files are not on main yet. When their files appear, pull them. Do not rewrite them.
 7. No build step, no framework, and no new astronomy library.
 
+Challenge fit. The product is rapid comparison of sites and of dates for Sun position, Earth position, power, and direct-to-Earth. Libration and the Moon's changing distance are already in the ephemeris. Keep them. Do not replace them with a flat model. Topography and 3D terrain are optional in the brief and out of scope. Keep the uniform horizon mask and say it is not a LOLA horizon. Do not download DEMs or build a 3D moon. No atmosphere and no refraction. The horizon is geometric. Write for a planner and for a student on the same screen: numbers a planner can use, and one plain sentence about why the south pole is different from Apollo.
+
 You create two files only: viz.js and viz-demo.html. Do not edit ephemeris.js, sites.js, index.html, styles.css, app.js, ENGINE.md, or anything in test/. Session 3 owns the app shell and will call the API below. Session 1 owns the sky math. The math is already checked against JPL Horizons to 0.007°. Do not reimplement it. Pull before you finish so you are drawing against the latest engine on main.
 
 Load order in viz-demo.html: vendor/astronomy.browser.js, then sites.js, then ephemeris.js, then viz.js. Classic script tags, not ES modules, so the demo works from file:// and from a static server. Global you must set: window.LunarViz.
@@ -475,7 +479,7 @@ samples are arrays from LunarEph.sampleMission. Each point has t, sunAlt, sunAz,
 Science the pictures must not lie about:
 - Azimuth 0 is north, 90 is east, clockwise, same as Horizons. On the horizon canvas, put north at the horizontal center, east to the right, south at both edges.
 - The Moon has no air. The horizon is a hard line at elevation 0. The user’s mask is a second dashed line at model.maskDeg.
-- At the south pole the Sun and Earth stay within a few degrees of that line. If the data span is under about 30°, zoom the elevation axis so the skim is readable, and paint a small label “Zoomed to the horizon”. Always include 0 and the mask in the axis. If any site sends the Sun above about 40°, expand the scale to fit. Apollo has to look different from Mons Mouton.
+- At the south pole the Sun and Earth stay within a few degrees of that line. If the data span is under about 30°, zoom the elevation axis so the skim is readable, and paint a small label “Zoomed to the horizon”. Always include 0 and the mask in the axis. If any site sends the Sun above about 40°, expand the scale to fit. Apollo has to look different from Mons Mouton. That contrast is why a lunar day is not an Earth day. Do not add a 3D moon.
 - Draw Sun and Earth disks at true angular diameter using the elevation scale (Sun ~0.5°, Earth ~1.9°, so Earth is several times wider). If the true radius would be under 6 px, draw 6 px and add the words “Disks enlarged”.
 - A translucent ground may shade elevations below 0. Disks and trails below the horizon must remain visible. −1° and −8° are different answers.
 - Trails come from samples across the mission. Break a trail when azimuth jumps by more than 180°.
@@ -532,6 +536,8 @@ Team rules, all three sessions:
 6. The other sessions will push while you work. Pull again before you call the task done. Code to the contract in this prompt even if viz.js or eventsFromSamples is not on main yet. When they appear, pull and retest. Do not rewrite viz.js, viz-demo.html, ephemeris.js, sites.js, or test/.
 7. No build step, no framework, and no new astronomy library.
 
+Challenge fit. The product is rapid comparison of sites and of dates for Sun position, Earth position, power, and direct-to-Earth. Libration and the Moon's changing distance are already in the ephemeris. Keep them. Do not replace them with a flat model. Topography and 3D terrain are optional in the brief and out of scope. Keep the uniform horizon mask and say it is not a LOLA horizon. Do not download DEMs or build a 3D moon. No atmosphere and no refraction. The horizon is geometric. Write for a planner and for a student on the same screen: numbers a planner can use, and one plain sentence about why the south pole is different from Apollo.
+
 You own app.js, index.html, styles.css, and README.md. Do not edit ephemeris.js, sites.js, viz.js, viz-demo.html, test/, or ENGINE.md.
 
 The sky math is done. window.LunarEph is loaded by index.html. It has been checked against JPL Horizons to within 0.007°. Trust it. On 2026-11-14 00:00 UTC at Mons Mouton (−85.416, 31.851) the Sun is about +1.17° at azimuth 95° and the Earth’s center is about −0.81°. The Earth limb is about 0.95° in radius, so the limb is essentially on the horizon while the center is below it. Say that kind of thing in the readout when it is true. Do not re-derive the ephemeris in the UI.
@@ -577,14 +583,14 @@ Behavior:
 - #play animates the playhead from its current time to the end of the window. Respect prefers-reduced-motion by stepping in 1-hour jumps on a slow timer instead of a smooth glide.
 - Chart click or drag sets the playhead. Space toggles play. Arrow keys move one hour. Shift+arrows move one day. Clamp to the window.
 - #step-back and #step-fwd move the landing epoch by one day and reset the playhead to the new start. #now-btn sets the landing epoch to the current UTC hour.
-- #readout is the playhead, not the landing form. Include T+ from landing, Sun alt and az, Earth alt and az, limb clearance (earthAlt + earthRadius − mask), power at this instant, and the next sunset or sunrise and link-down or link-up. If none fall inside the mission, say “none in this mission.”
+- #readout is the playhead, not the landing form. Include T+ from landing, Sun alt and az, Earth alt and az, limb clearance (earthAlt + earthRadius − mask), power at this instant, and the next sunset or sunrise and link-down or link-up. If none fall inside the mission, say “none in this mission.” Also show subEarthLat and subEarthLon and call that Earth’s wobble (libration) in one clause.
 - #metrics is four cards for the primary: sunlight percent and longest night, DTE percent and longest gap, joint percent and hours, energy and mean power. #compare is a table when two or three sites are selected, same metrics per site.
-- #insights is a short reading in plain sentences. Negative subsolar latitude: south-pole sunlight season. Positive: south-pole shadowed season. Near zero: transitional. If the primary is south of −80 and the chosen array is vertical, also run sampleMission once with tiltDeg 0 and quote both energies. If the user picked horizontal, quote the vertical energy instead. With two sites, state the difference in sunlit hours and DTE hours.
+- #insights is a short reading in plain sentences. Negative subsolar latitude: south-pole sunlight season. Positive: south-pole shadowed season. Near zero: transitional. If the primary is south of −80 and the chosen array is vertical, also run sampleMission once with tiltDeg 0 and quote both energies. If the user picked horizontal, quote the vertical energy instead. With two sites, state the difference in sunlit hours and DTE hours. When two selected sites are both south of −80 and within about 5° of each other, say what that short move did to sunlight hours and DTE hours. Mention heat only as a consequence of solar elevation: a grazing Sun means low power and a long cold shadow. Do not invent temperatures. One sentence must be plain enough for a student and say why this polar site is unlike Apollo.
 - #panel-hint: when Sun elevation at the playhead is between 0.5° and 20°, show the ratio cos(alt)/sin(alt) as how many times a tracking vertical array beats a flat one at that instant, before efficiency.
-- #scan fills #windows for the primary site. Clicking a result sets the landing epoch to that start and recomputes. Disable the button while it runs. A year-long mission still calls scanWindows. The label can say the windows overlap.
+- #scan fills #windows for the primary site. This date scan is required. It is how a slipped launch gets a new window. Clicking a result sets the landing epoch to that start and recomputes. Disable the button while it runs. A year-long mission still calls scanWindows. The label can say the windows overlap.
 - #csv downloads the primary samples: time_utc, sun_alt_deg, sun_az_deg, earth_alt_deg, earth_az_deg, sun_frac, earth_disk, dte, joint, irradiance_w_m2, power_w_m2.
 - URL hash round-trips sites, landing time, duration hours, mask, panel mode, tilt, tracking, azimuth, efficiency. ReplaceState, do not push a new history entry on every scrub. Apply the hash on load.
-- #season shows subsolar latitude from the playhead evaluation and one season phrase.
+- #season shows subsolar latitude from the playhead evaluation and one season phrase. A grazing elevation is the thermal proxy. Do not print a temperature.
 - #map-mode is passed through as model.mapMode.
 
 Copy: UTC labeled on the inputs. Status words from the site records can show as small tags. Do not call the tool flight-certified. Do not claim a LOLA horizon. The footer already explains the sphere, Horizons, and the mask. Keep that explanation accurate if you touch it.

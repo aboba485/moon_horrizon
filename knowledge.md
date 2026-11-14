@@ -20,6 +20,10 @@ IM-1 is −80.13, 1.44. A listing at −84.9, 12.9 was rejected. IM-2 Athena is 
 
 Faustini Rim A, Connecting Ridge Extension, and LCROSS were left out rather than given guessed coordinates.
 
+## Scope after the full challenge brief
+
+The longer Space Apps text does not add a product. Libration stays in the IAU series and must be shown as sub-Earth latitude and longitude. The date scan and a short move between south-polar sites stay required. Solar elevation is the only thermal statement. No invented temperatures. No DEM download and no 3D Moon.
+
 ## Performance
 
 400 `atSite` calls ≈ 53 ms. One lunar day at 30 minutes ≈ 67 ms. Safe to recompute on the UI thread. Do not resample the whole mission on every animation frame.
