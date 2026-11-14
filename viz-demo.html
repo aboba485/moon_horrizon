@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lunar Horizon — viz demo</title>
+<style>
+  /* Demo-only styling. The app theme lives in styles.css, which this page does not touch. */
+  body {
+    margin: 0;
+    padding: 24px;
+    background: #0c0b09;
+    color: #f4efe6;
+    font-family: "Outfit", "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  h1 { font-size: 20px; font-weight: 560; margin: 0 0 4px; }
+  p.sub { color: #a79d90; margin: 0 0 18px; }
+  .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .col { flex: 1 1 560px; min-width: 420px; }
+  canvas { display: block; width: 100%; border: 1px solid rgba(243,232,214,0.12); border-radius: 8px; }
+  #horizon { height: 360px; }
+  #chart { height: 240px; margin-top: 14px; }
+  #map { width: 420px; height: 420px; flex: 0 0 auto; }
+  .controls { display: flex; gap: 10px; align-items: center; margin: 14px 0; flex-wrap: wrap; }
+  button, select {
+    background: #221f1a; color: #f4efe6; border: 1px solid rgba(243,232,214,0.28);
+    border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer;
+  }
+  button.on { border-color: #f0a202; color: #ffd27a; }
+  input[type=range] { flex: 1 1 240px; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; color: #a79d90; }
+  #hit { min-height: 1.2em; }
+</style>
+</head>
+<body>
+<h1>Lunar Horizon — viz demo</h1>
+<p class="sub">One lunar day from 2026-11-14 00:00 UTC, mask 0°, vertical tracking array, 30% cells. All times UTC.</p>
+
+<div class="controls">
+  <button id="btn-mouton" class="on">Mons Mouton</button>
+  <button id="btn-apollo">Apollo 11</button>
+  <input id="scrub" type="range" min="0" max="100" value="0" step="1">
+  <span id="when" class="mono"></span>
+</div>
+
+<div class="row">
+  <div class="col">
+    <canvas id="horizon"></canvas>
+    <canvas id="chart"></canvas>
+  </div>
+  <div>
+    <canvas id="map"></canvas>
+    <div class="controls">
+      <label for="map-mode-demo">Map mode</label>
+      <select id="map-mode-demo">
+        <option value="polar" selected>polar</option>
+        <option value="near">near</option>
+        <option value="auto">auto</option>
+      </select>
+      <span class="mono" id="hit">click a marker…</span>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/astronomy.browser.js"></script>
+<script src="sites.js"></script>
+<script src="ephemeris.js"></script>
+<script src="viz.js"></script>
+<script>
+(function () {
+  "use strict";
+  var LUNAR_DAY_MS = Math.round(29.530589 * 86400000);
+  var START = Date.parse("2026-11-14T00:00:00Z");
+  var MASK = 0;
+  var PANEL = { tiltDeg: 90, tracking: true, efficiency: 0.3 };
+  var STEP = 30 * 60 * 1000;
+
+  var defs = [
+    { id: "mouton", name: "Mons Mouton", short: "Mouton", lat: -85.416, lon: 31.851, color: "#f4efe4" },
+    { id: "apollo11", name: "Apollo 11", short: "Apollo 11", lat: 0.67408, lon: 23.47297, color: "#ef8f62" }
+  ];
+  defs.forEach(function (d) {
+    d.samples = LunarEph.sampleMission(new Date(START), LUNAR_DAY_MS, d.lat, d.lon, { stepMs: STEP, maskDeg: MASK, panel: PANEL });
+    d.now = LunarEph.evaluate(new Date(START), d.lat, d.lon, MASK, PANEL);
+  });
+
+  var horizonCanvas = document.getElementById("horizon");
+  var chartCanvas = document.getElementById("chart");
+  var mapCanvas = document.getElementById("map");
+  var scrub = document.getElementById("scrub");
+  var whenEl = document.getElementById("when");
+  var hitEl = document.getElementById("hit");
+  var modeSel = document.getElementById("map-mode-demo");
+
+  var state = { which: 0, playheadMs: START };
+  scrub.max = String(LUNAR_DAY_MS);
+  scrub.step = String(STEP);
+
+  function siteModel() {
+    var d = defs[state.which];
+    return {
+      sites: [d],
+      primaryId: d.id,
+      playheadMs: state.playheadMs,
+      landingMs: START,
+      maskDeg: MASK,
+      mapMode: "auto"
+    };
+  }
+
+  // The map always gets both sites. In polar mode the mixed pair forces the
+  // stereographic span to grow past the 15° cap until Apollo 11 fits; viz.js
+  // computes that span from the site latitudes.
+  function mapModel() {
+    return {
+      sites: defs,
+      primaryId: defs[state.which].id,
+      playheadMs: state.playheadMs,
+      landingMs: START,
+      maskDeg: MASK,
+      mapMode: modeSel.value
+    };
+  }
+
+  function redrawAll() {
+    var d = defs[state.which];
+    d.now = LunarEph.evaluate(new Date(state.playheadMs), d.lat, d.lon, MASK, PANEL);
+    LunarViz.drawHorizon(horizonCanvas, siteModel());
+    LunarViz.drawChart(chartCanvas, siteModel());
+    LunarViz.drawMap(mapCanvas, mapModel());
+    whenEl.textContent = new Date(state.playheadMs).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  }
+
+  function pick(which) {
+    state.which = which;
+    document.getElementById("btn-mouton").classList.toggle("on", which === 0);
+    document.getElementById("btn-apollo").classList.toggle("on", which === 1);
+    redrawAll();
+  }
+
+  document.getElementById("btn-mouton").addEventListener("click", function () { pick(0); });
+  document.getElementById("btn-apollo").addEventListener("click", function () { pick(1); });
+  scrub.addEventListener("input", function () {
+    state.playheadMs = START + Number(scrub.value);
+    redrawAll();
+  });
+  modeSel.addEventListener("change", redrawAll);
+
+  mapCanvas.addEventListener("click", function (ev) {
+    var rect = mapCanvas.getBoundingClientRect();
+    var id = LunarViz.hitMap(mapCanvas, mapModel(), ev.clientX - rect.left, ev.clientY - rect.top);
+    console.log("hitMap:", id);
+    hitEl.textContent = id ? "hit: " + id : "hit: (nothing)";
+  });
+
+  window.addEventListener("resize", redrawAll);
+  redrawAll();
+})();
+</script>
+</body>
+</html>
