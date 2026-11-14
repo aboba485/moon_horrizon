@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lunar Horizon — landing site navigator</title>
+  <meta name="description" content="Compare lunar landing sites and dates. See the Sun and Earth on the horizon, and judge solar power and direct-to-Earth contact.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23f0a202'/%3E%3Ccircle cx='12' cy='14' r='8' fill='%230c0b09'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <div class="brand">
+          <div class="mark" aria-hidden="true"></div>
+          <div>
+            <div class="eyebrow">Mission console</div>
+            <h1>Lunar Horizon</h1>
+          </div>
+        </div>
+        <p class="lede">Pick a landing site and a date. See where the Sun and Earth sit relative to the horizon, then judge power and the direct link home.</p>
+      </div>
+      <div class="season" id="season" aria-live="polite"></div>
+    </header>
+
+    <aside>
+      <div class="map-wrap">
+        <div class="map-bar">
+          <span>Click a site</span>
+          <select id="map-mode" aria-label="Map projection">
+            <option value="auto">Auto map</option>
+            <option value="polar">South pole</option>
+            <option value="near">Near side</option>
+          </select>
+        </div>
+        <canvas id="map" width="680" height="500"></canvas>
+      </div>
+      <input id="search" class="search" type="search" placeholder="Search sites" aria-label="Search sites">
+      <div class="filters" id="filters"></div>
+      <div class="presets">
+        <button type="button" id="preset-contrast">Near side vs far side</button>
+        <button type="button" id="preset-artemis">Three Artemis regions</button>
+      </div>
+      <div class="site-list" id="site-list" role="listbox" aria-label="Landing sites"></div>
+      <p class="note" id="site-note"></p>
+
+      <form class="custom" id="custom-form">
+        <h2>Custom coordinates</h2>
+        <label>Name<input id="custom-name" type="text" maxlength="60" placeholder="Ridge camp"></label>
+        <label>Latitude<input id="custom-lat" type="number" min="-90" max="90" step="0.0001" value="-89.5" required></label>
+        <label>Longitude<input id="custom-lon" type="number" min="-180" max="180" step="0.0001" value="0" required></label>
+        <button class="primary-btn full" type="submit">Use these coordinates</button>
+        <p class="help full">Degrees. South and west are negative. Longitude is east-positive, Mean Earth frame.</p>
+      </form>
+
+      <div class="stack">
+        <div class="block-title">Horizon mask</div>
+        <div class="row-between"><span>Terrain clearance</span><span class="mono" id="mask-read">0.0°</span></div>
+        <input id="mask" type="range" min="-4" max="15" step="0.1" value="0" aria-label="Horizon mask in degrees">
+        <div class="chips" id="mask-presets">
+          <button type="button" data-mask="-1.5">High peak −1.5°</button>
+          <button type="button" data-mask="0">Smooth sphere</button>
+          <button type="button" data-mask="2">Clearance +2°</button>
+          <button type="button" data-mask="8">Crater wall +8°</button>
+        </div>
+        <p class="help">The Moon has no air, so the geometric horizon is sharp. Real south-pole skylines are crater rims, not this flat mask. Raise it to ask “what if the terrain blocks the first few degrees?”</p>
+
+        <div class="block-title">Solar array</div>
+        <label>Arrangement
+          <select id="panel-mode">
+            <option value="vertical">Vertical, tracking the Sun in azimuth</option>
+            <option value="horizontal">Flat on the ground</option>
+            <option value="tilt">Fixed tilt</option>
+          </select>
+        </label>
+        <label>Tilt from horizontal <span class="mono" id="tilt-read">90°</span>
+          <input id="tilt" type="range" min="0" max="90" step="1" value="60">
+        </label>
+        <label class="check"><input id="tracking" type="checkbox" checked> Rotate to face the Sun’s azimuth</label>
+        <label>Fixed azimuth <span class="mono" id="az-read">0°</span>
+          <input id="azimuth" type="range" min="0" max="359" step="1" value="0">
+        </label>
+        <label>Cell efficiency <span class="mono" id="eff-read">30%</span>
+          <input id="efficiency" type="range" min="15" max="40" step="1" value="30">
+        </label>
+        <p class="help" id="panel-hint"></p>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <div class="controls">
+        <label>Landing date (UTC)<input id="land-date" type="date"></label>
+        <label>Time<input id="land-time" type="time" step="60"></label>
+        <label>Mission length
+          <select id="duration">
+            <option value="24">24 hours</option>
+            <option value="168">7 days</option>
+            <option value="336">14 days</option>
+            <option value="708.734" selected>One lunar day (29.5 d)</option>
+            <option value="2126.2">Three lunar days</option>
+            <option value="4383">Six months</option>
+            <option value="8760">One year</option>
+          </select>
+        </label>
+        <div class="control-buttons">
+          <button type="button" class="text-btn" id="step-back" title="Landing minus 1 day">−1d</button>
+          <button type="button" class="text-btn" id="step-fwd" title="Landing plus 1 day">+1d</button>
+          <button type="button" class="text-btn" id="now-btn">Now</button>
+          <button type="button" class="primary-btn" id="play">Play</button>
+        </div>
+        <div class="selected-chips" id="chips" aria-label="Sites in this comparison"></div>
+      </div>
+
+      <section class="hero" aria-label="Horizon view">
+        <canvas id="horizon" width="1200" height="880"></canvas>
+        <div class="readout" id="readout"></div>
+        <div class="legend">
+          <span><i class="swatch sun"></i>Sun, true angular size when the scale is zoomed</span>
+          <span><i class="swatch earth"></i>Earth, about 2° across</span>
+          <span><i class="swatch mask"></i>Horizon mask</span>
+          <span>North is centered. Azimuth runs eastward.</span>
+        </div>
+      </section>
+
+      <section class="metrics" id="metrics" aria-label="Mission metrics"></section>
+      <div id="compare"></div>
+
+      <section class="chart-wrap">
+        <div class="chart-bar">
+          <div class="block-title">Through the mission</div>
+          <div>
+            <button type="button" class="text-btn" id="csv">Download CSV</button>
+          </div>
+        </div>
+        <canvas id="chart" width="1200" height="560"></canvas>
+      </section>
+
+      <div class="split">
+        <section class="panel" id="insights" aria-label="Reading of this site and date"></section>
+        <section class="panel">
+          <div class="split-head">
+            <div class="block-title">Better landing dates</div>
+            <button type="button" class="text-btn" id="scan">Scan the next year</button>
+          </div>
+          <p class="help">Ranks start times for the primary site and the mission length you picked. The screen steps every 6 hours, then you can open a date and read it at full resolution.</p>
+          <div class="window-list" id="windows"></div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="colophon">
+      <details>
+        <summary>How the numbers are made, and what they leave out</summary>
+        <p>Sun and Earth directions use Astronomy Engine for the vectors and the IAU lunar pole and prime meridian for the Mean Earth frame. Altitude is airless and topocentric on a 1,737.4 km sphere. Checked against JPL Horizons apparent azimuth and elevation: the test cases agree to better than 0.01°.</p>
+        <p>A body is “up” for sunlight when any of the solar disk clears the mask. Power is the solar constant scaled to the Moon–Sun distance, times the cosine of the incidence angle on the panel you picked, times cell efficiency, times the lit fraction of the disk. One square metre, no dust, no mutual shading.</p>
+        <p>Direct-to-Earth means a geometric line of sight from the site to Goldstone, Madrid, or Canberra. It is not a schedule, a link budget, or a terrain mask. Earth-disk visibility is separate: the limb clears the mask even when the center of Earth is still below it. That margin is about one degree, and at the south pole one degree is the whole story.</p>
+        <p>There is no LOLA horizon in this tool. Peaks of eternal light and crater floors can disagree with a smooth sphere by many degrees. Use the mask as a question, not as a flight prediction.</p>
+      </details>
+    </footer>
+  </div>
+  <script src="vendor/astronomy.browser.js"></script>
+  <script src="sites.js"></script>
+  <script src="ephemeris.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
