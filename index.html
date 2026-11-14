@@ -23,6 +23,7 @@
           </div>
         </div>
         <p class="lede">Pick a landing site and a date. See where the Sun and Earth sit relative to the horizon, then judge power and the direct link home.</p>
+        <p class="lede audience">For anyone choosing where a lander sits down: Artemis and CLPS mission planners, instrument teams sizing a battery, and students who want to see why a flat-map answer and a real-terrain answer are not the same number.</p>
       </div>
       <div class="top-right">
         <div class="modes" role="group" aria-label="Interface mode">
@@ -123,6 +124,11 @@
         <div class="selected-chips" id="chips" aria-label="Sites in this comparison"></div>
       </div>
 
+      <section class="stories" aria-label="Guided findings">
+        <div class="story-bar" id="story-bar"></div>
+        <div class="story-note" id="story-note"></div>
+      </section>
+
       <section class="simple" id="simple" aria-label="Globe view">
         <div class="globe-wrap">
           <canvas id="globe" width="760" height="760" tabindex="0" role="img"
@@ -166,6 +172,12 @@
           <div class="window-list" id="windows"></div>
         </section>
       </div>
+      <section class="evidence" aria-label="Data sources and validation">
+        <details id="evidence">
+          <summary>Where the data comes from, and how it was checked</summary>
+          <div id="evidence-body"></div>
+        </details>
+      </section>
     </main>
 
     <footer class="colophon">
@@ -185,6 +197,7 @@
   <script src="viz.js"></script>
   <script src="globe.js"></script>
   <script src="terrain.js"></script>
+  <script src="validation.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

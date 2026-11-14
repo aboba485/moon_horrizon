@@ -135,8 +135,44 @@
   var custom = loadCustom();
   var terrain = window.LUNAR_TERRAIN || null;
 
+  /* Three findings this tool produces that a flat-map answer does not. They are
+     the demo and the argument at once: each one sets up a scenario and then the
+     note reads the numbers back out of the live model, so nothing here can go
+     stale if the engine or the terrain changes. */
+  var STORY_EPOCH = Date.UTC(2026, 10, 14, 0, 0);
+  var STORY_HOURS = 708.734;
+
+  var STORIES = [
+    {
+      id: "rim",
+      site: "shackleton",
+      label: "The rim that eats the Sun",
+      teaser: "Shackleton, with and without its own terrain"
+    },
+    {
+      id: "margin",
+      site: "mouton",
+      label: "A whole lunar day of sunlight",
+      teaser: "Mons Mouton, and the half-degree it hangs on"
+    },
+    {
+      id: "silence",
+      site: "change4",
+      label: "Where Earth never rises",
+      teaser: "Chang\u2019e 4 on the far side, and what libration cannot fix"
+    }
+  ];
+
+  function storyById(id) {
+    for (var i = 0; i < STORIES.length; i++) {
+      if (STORIES[i].id === id) return STORIES[i];
+    }
+    return null;
+  }
+
   var state = {
     ui: "simple",
+    story: null,
     selected: ["mouton"],
     landingMs: 0,
     durationHours: 708.734,
@@ -477,6 +513,120 @@
         s.meanPower.toFixed(0) + " average watts per m\u00b2, night included");
   }
 
+  /* The same mission against a smooth 1,737.4 km sphere, which is what every
+     tool that does not carry a DEM is implicitly answering. */
+  function sphereSummary(site) {
+    var samples = LunarEph.sampleMission(new Date(state.landingMs), missionMs(), site.lat, site.lon, {
+      maskDeg: 0,
+      panel: panelSpec()
+    });
+    return LunarEph.summarize(samples);
+  }
+
+  function renderStories() {
+    el("story-bar").innerHTML = STORIES.map(function (story) {
+      return '<button type="button" data-story="' + esc(story.id) + '"' +
+        (state.story === story.id ? ' class="on"' : "") + ">" +
+        "<b>" + esc(story.label) + "</b><span>" + esc(story.teaser) + "</span></button>";
+    }).join("");
+  }
+
+  function storyBody(model) {
+    var entry = model.sites[0];
+    var s = entry.summary;
+
+    if (state.story === "rim") {
+      var sphere = sphereSummary(entry.site);
+      return "<h3>Shackleton keeps the Sun for " + '<span class="figure">' + pct(s.sunlitFrac) +
+        "</span> of a lunar day, not " + '<span class="counter">' + pct(sphere.sunlitFrac) + "</span></h3>" +
+        "<p>Shackleton sits almost exactly on the pole, so on a smooth sphere the Sun never sets: " +
+        '<span class="counter">' + pct(sphere.sunlitFrac) + "</span> sunlit, " +
+        '<span class="counter">' + energy(sphere.energyWh) + "/m\u00b2</span>. That is the answer you get from a map.</p>" +
+        "<p>Against the crater\u2019s own rim, measured from the LOLA polar DEM at 120 m per pixel, " +
+        "the skyline rises to " + deg(entry.terrain ? entry.terrain.max : 0, 1) +
+        " in some directions and the Sun spends much of the month behind it: " +
+        '<span class="figure">' + pct(s.sunlitFrac) + "</span> sunlit, " +
+        '<span class="figure">' + energy(s.energyWh) + "/m\u00b2</span>, with a " +
+        msHours(s.longestNight.ms) + " night the sphere model says does not exist.</p>" +
+        "<p>That gap is the whole reason the terrain is in this tool. Size a battery off the first number and the lander dies.</p>";
+    }
+
+    if (state.story === "margin") {
+      var tight = tightestSun(entry);
+      return "<h3>Mons Mouton is sunlit all month \u2014 by " + '<span class="figure">' + deg(tight.margin, 2) + "</span></h3>" +
+        "<p>Over this lunar day Mouton reads " + '<span class="figure">' + pct(s.sunlitFrac) +
+        " sunlight</span> and " + '<span class="figure">' + energy(s.energyWh) +
+        "/m\u00b2</span>. Printed on a slide that looks like a solved problem.</p>" +
+        "<p>Walk the samples and the solar limb comes within " + '<span class="figure">' + deg(tight.margin, 2) +
+        "</span> of the measured skyline on " + utcStamp(tight.timeMs) + ", with the Sun at " + deg(tight.alt, 1) +
+        " and the terrain at " + deg(tight.mask, 1) + " on that bearing. The LOLA product resolves 120 m; " +
+        "a ridge finer than that, or one beyond the 100 km these rays reach, erases the margin and with it the claim.</p>" +
+        "<p>So the tool refuses to print \u201c100% sunlight\u201d on its own. The margin is reported every time, " +
+        "because a number without its error bar is not a finding.</p>";
+    }
+
+    if (state.story === "silence") {
+      return "<h3>Chang\u2019e 4 has " + '<span class="figure">' + pct(s.dteFrac) + "</span> direct-to-Earth time</h3>" +
+        "<p>On the far side Earth is not low, it is absent. Over the whole lunar day Earth\u2019s altitude runs " +
+        deg(s.earthMin, 1) + " to " + deg(s.earthMax, 1) + " \u2014 never once above the horizon \u2014 " +
+        "so there is " + '<span class="figure">' + pct(s.dteFrac) + "</span> of direct link and a blackout " +
+        msHours(s.longestBlackout.ms) + " long. China flew the Queqiao relay satellite for exactly this reason.</p>" +
+        "<p>Contrast it with Slater Plain, just past the mean-Earth hemisphere near the south pole, where libration of " +
+        "about \u00b18\u00b0 lifts Earth over the horizon for a third of the month. \u201cFar side\u201d and \u201cno link\u201d " +
+        "are not the same statement, and only the geometry tells you which one you have.</p>" +
+        "<p>Power is the other half: " + '<span class="figure">' + pct(s.sunlitFrac) + "</span> sunlit here, " +
+        "with a " + msHours(s.longestNight.ms) + " night to survive.</p>";
+    }
+    return "";
+  }
+
+  function renderStoryNote(model) {
+    el("story-note").innerHTML = state.story ? storyBody(model) : "";
+  }
+
+  function renderEvidence() {
+    var v = window.LUNAR_VALIDATION;
+    var body = el("evidence-body");
+    if (!v) {
+      body.innerHTML = '<p class="repro">validation.js is not loaded.</p>';
+      return;
+    }
+
+    var sources = v.sources.map(function (src) {
+      return '<div class="src"><b>' + esc(src.label) + '</b> <span class="detail">' + esc(src.detail) + "</span>" +
+        '<div class="role">' + esc(src.role) + "</div>" +
+        '<div class="where">' + esc(src.where) + "</div></div>";
+    }).join("");
+
+    var rows = v.cases.map(function (c) {
+      return "<tr><td>" + esc(c.name) + " \u00b7 " + esc(c.body) + "</td>" +
+        '<td class="num">' + c.az.toFixed(3) + " / " + c.el.toFixed(3) + "</td>" +
+        '<td class="num">' + c.hAz.toFixed(3) + " / " + c.hEl.toFixed(3) + "</td>" +
+        '<td class="num">' + c.dAz.toFixed(3) + "</td>" +
+        '<td class="num">' + c.dEl.toFixed(3) + "</td>" +
+        '<td class="pass">ok</td></tr>';
+    }).join("");
+
+    var terrainLine = terrain
+      ? "Profiles for " + terrainCount() + " of the catalogue\u2019s sites, every one south of " +
+        Math.abs(terrain.meta.minLat) + "\u00b0S, at " + terrain.meta.bins + " azimuths each, rays to " +
+        terrain.meta.rayKm + " km. Generated " + esc(terrain.meta.generated) + " by tools/lola-horizon.mjs."
+      : "terrain.js is not loaded.";
+
+    body.innerHTML =
+      "<h3>NASA data this project runs on</h3>" + sources +
+      '<p class="repro">' + terrainLine + "</p>" +
+      "<h3>Checked against JPL Horizons</h3>" +
+      "<table><tr><th>Case</th><th class=\"num\">This tool az / el</th><th class=\"num\">Horizons az / el</th>" +
+      "<th class=\"num\">\u0394az</th><th class=\"num\">\u0394el</th><th></th></tr>" + rows + "</table>" +
+      '<p class="repro">Degrees, apparent azimuth and elevation, topocentric on the lunar surface (' +
+      esc(v.centre) + ", quantity " + esc(v.quantity) + "). Worst disagreement <b>" +
+      v.worstDeg.toFixed(3) + "\u00b0</b> against a " + v.toleranceDeg + "\u00b0 tolerance. " +
+      "Subsolar latitude peaks at " + v.subSolarPeakDeg.toFixed(3) + "\u00b0 over 2026, inside the \u00b11.6\u00b0 the Moon\u2019s tilt allows. " +
+      "Recorded " + esc(v.ranOn) + "; reproduce with <code>node test/validate.mjs</code>, which queries " +
+      esc(v.api) + " live and fails if this tool ever drifts.</p>";
+  }
+
   /* Simple mode's only readout. Same numbers the console shows, no controls.
      Deliberately leads with the two fractions a lander actually lives on. */
   function renderSimpleCard(model) {
@@ -776,6 +926,8 @@
     }
     if (!options.light) {
       syncTerrainInputs();
+      renderStories();
+      renderStoryNote(model);
       renderFilters();
       renderSiteList();
       renderChips();
@@ -811,10 +963,63 @@
     recompute();
   }
 
+  /* ---------- guided findings ---------- */
+
+  var globeGoTo = null;
+
+  function flyToPrimary() {
+    if (!globeGoTo) return;
+    var site = primarySite();
+    if (!site) return;
+    var polar = site.lat <= -80;
+    globeGoTo(polar ? -89 : site.lat, site.lon, polar ? 2.8 : 1.6);
+  }
+
+  /* A story is a scenario, not a slideshow: it sets the same state the controls
+     set, so every claim it makes stays live and the user can keep poking at it.
+     Shared with boot, because `st=` in the URL has to reproduce the whole setup
+     and not just the caption. */
+  function applyStory(story) {
+    state.story = story.id;
+    state.selected = [story.site];
+    state.landingMs = STORY_EPOCH;
+    state.durationHours = STORY_HOURS;
+    state.maskDeg = 0;
+    state.terrain = !!terrain;
+  }
+
+  function storyFromHash() {
+    var story = state.story ? storyById(state.story) : null;
+    if (story && siteById(story.site)) applyStory(story);
+    else state.story = null;
+  }
+
+  function setStory(id) {
+    if (state.story === id) {
+      state.story = null;
+      recompute();
+      return;
+    }
+    var story = storyById(id);
+    if (!story || !siteById(story.site)) return;
+    applyStory(story);
+    stopPlay();
+    el("land-date").value = utcDateValue(state.landingMs);
+    el("land-time").value = utcTimeValue(state.landingMs);
+    syncPanelInputs();
+    resetPlayhead();
+    dropCache();
+    recompute();
+    flyToPrimary();
+  }
+
   /* ---------- selection ---------- */
 
   function selectOnly(id) {
     if (!siteById(id)) return;
+    /* Picking a different site would leave the story's text describing a place
+       that is no longer on screen, so the story steps aside. */
+    state.story = null;
     state.selected = [id];
     resetPlayhead();
     recompute();
@@ -1013,6 +1218,7 @@
   function writeHash() {
     var params = new URLSearchParams();
     params.set("ui", state.ui);
+    if (state.story) params.set("st", state.story);
     params.set("s", state.selected.join(","));
     params.set("t", utcIso(state.landingMs));
     params.set("d", String(state.durationHours));
@@ -1041,6 +1247,7 @@
 
     var ui = params.get("ui");
     if (ui === "simple" || ui === "expert") state.ui = ui;
+    state.story = storyById(params.get("st")) ? params.get("st") : null;
 
     var sites = params.get("s");
     if (sites) {
@@ -1284,8 +1491,13 @@
       setMode("expert");
     });
 
+    el("story-bar").addEventListener("click", function (e) {
+      var button = e.target.closest("button[data-story]");
+      if (button) setStory(button.getAttribute("data-story"));
+    });
+
     if (window.LunarGlobe) {
-      var goTo = LunarGlobe.attach(el("globe"), {
+      globeGoTo = LunarGlobe.attach(el("globe"), {
         model: function () {
           return lastModel ? globeModel(lastModel) : null;
         },
@@ -1295,7 +1507,7 @@
         onPick: function (hit) {
           /* A pole cluster is 17 sites inside a few degrees, so the first click
              flies the camera in instead of guessing which one you meant. */
-          if (hit.cluster) goTo(-89, 0, 2.8);
+          if (hit.cluster) globeGoTo(-89, 0, 2.8);
           else selectOnly(hit.id);
         }
       });
@@ -1373,6 +1585,7 @@
 
     window.addEventListener("hashchange", function () {
       if (readHash()) {
+        storyFromHash();
         applyMode();
         syncPanelInputs();
         el("land-date").value = utcDateValue(state.landingMs);
@@ -1401,14 +1614,17 @@
     }
     state.landingMs = Math.floor(Date.now() / HOUR) * HOUR;
     readHash();
+    storyFromHash();
     applyMode();
     resetPlayhead();
     el("land-date").value = utcDateValue(state.landingMs);
     el("land-time").value = utcTimeValue(state.landingMs);
     syncPanelInputs();
     wire();
+    renderEvidence();
     render();
     writeHash();
+    if (state.story) flyToPrimary();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

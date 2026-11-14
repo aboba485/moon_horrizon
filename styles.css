@@ -175,6 +175,63 @@ h1 {
 }
 .simple-card .source { margin: 10px 0 0; color: var(--faint); font-size: 11.5px; }
 
+.lede.audience { margin-top: 6px; color: var(--faint); font-size: 13px; }
+
+/* Guided findings: three clicks that are the demo and the argument at once. */
+.stories { margin-top: 14px; }
+.story-bar { display: flex; flex-wrap: wrap; gap: 8px; }
+.story-bar button {
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  max-width: 290px;
+}
+.story-bar button:hover { border-color: var(--line-strong); }
+.story-bar button.on { border-color: var(--sun); background: var(--panel-2); }
+.story-bar b { display: block; font-weight: 500; font-size: 13.5px; }
+.story-bar span { color: var(--muted); font-size: 12px; }
+.story-note:empty { display: none; }
+.story-note {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--sun);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.story-note h3 { margin: 0 0 6px; font-size: 15px; font-weight: 560; letter-spacing: -0.01em; }
+.story-note p { margin: 0 0 6px; }
+.story-note p:last-child { margin-bottom: 0; }
+.story-note .figure { font-family: var(--mono); color: var(--sun-2); }
+.story-note .counter { font-family: var(--mono); color: var(--muted); }
+
+/* Evidence: the NASA inputs and the Horizons check, in the app rather than
+   only in the README, because a five-minute demo never reaches the README. */
+.evidence { margin-top: 14px; }
+.evidence details {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+.evidence summary { cursor: pointer; color: var(--muted); }
+.evidence h3 { margin: 14px 0 6px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.evidence .src { border-top: 1px solid var(--line); padding: 9px 0; }
+.evidence .src b { font-weight: 560; }
+.evidence .src .detail { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.evidence .src .role { color: var(--ink); font-size: 13px; margin-top: 3px; }
+.evidence .src .where { color: var(--faint); font-size: 11.5px; margin-top: 2px; }
+.evidence table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+.evidence th, .evidence td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.evidence th { color: var(--muted); font-weight: 500; font-size: 11.5px; }
+.evidence td.num, .evidence th.num { text-align: right; font-family: var(--mono); font-size: 11.5px; }
+.evidence td.pass { color: var(--good); font-family: var(--mono); }
+.evidence .repro { margin: 10px 0 0; color: var(--faint); font-size: 12px; }
+.evidence code { font-family: var(--mono); color: var(--muted); }
+
 aside {
   border-right: 1px solid var(--line);
   padding: 16px 16px 28px;

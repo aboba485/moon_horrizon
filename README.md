@@ -6,6 +6,18 @@ Pick a site and a landing date. The tool shows where the Sun and Earth sit relat
 
 The south pole is the interesting case. The Moon's spin axis is about 1.54° from the ecliptic pole, so the subsolar latitude stays inside roughly ±1.6°. At a polar site the Sun circles the horizon once per lunar day and never climbs high, and Earth is nearly fixed in the sky, wobbling by the libration of about ±8°. A degree of elevation is the whole mission there, which is why the readout quotes tenths of a degree and the horizon is taken from a real LOLA elevation model rather than assumed flat.
 
+## The short version
+
+**Who it is for.** Anyone choosing where a lander sits down: Artemis and CLPS mission planners, instrument teams sizing a battery, and students who want to see why a flat-map answer and a real-terrain answer are not the same number.
+
+**What it does that a map cannot.** Shackleton crater is 100% sunlit on a smooth sphere and 48% sunlit against its own rim. That gap is 159 kWh/m² over a lunar day. Size a battery off the first number and the lander dies. The tool exists to make the second number as easy to get as the first.
+
+**Why you can believe it.** Every angle is checked against JPL Horizons; worst disagreement over eight cases spanning the pole, Mons Mouton, Apollo 11 and the far side is **0.007°**, against a 0.15° tolerance. The check is not a claim in this file — it is a table inside the app, under *Where the data comes from, and how it was checked*, and `node test/validate.mjs` re-runs it live against the Horizons API.
+
+**What NASA data it runs on.** LRO LOLA `LDEM_75S_120M` at 120 m per pixel supplies every horizon profile; JPL Horizons is the reference the engine is validated against; the IAU WGCCRE lunar orientation turns a sky vector into a direction on the ground; and the site catalogue is published landing coordinates, with the Artemis entries labelled as representative points inside candidate regions rather than touchdown pins. Remove the LOLA data and the headline numbers are wrong by tens of percent — it is load-bearing, not decoration.
+
+**How to see all of that in ninety seconds.** Three buttons at the top of the stage, each of which sets the site, date, and mission length and then explains the result in numbers read live from the engine. See [`DEMO.md`](DEMO.md) for the timed walkthrough.
+
 ## Running it
 
 No build step, no bundler, no package install. Open `index.html` in a browser, including over `file://`.
@@ -16,16 +28,17 @@ cd moon_horrizon
 open index.html        # or double-click it
 ```
 
-Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `ephemeris.js`, `viz.js`, `globe.js`, `terrain.js`, `app.js`.
+Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `ephemeris.js`, `viz.js`, `globe.js`, `terrain.js`, `validation.js`, `app.js`.
 
 - `ephemeris.js` is the sky math (`window.LunarEph`).
 - `sites.js` is the site catalogue (`window.LUNAR_SITES`, `window.LUNAR_GROUPS`).
 - `viz.js` draws the horizon, the chart, and the map (`window.LunarViz`).
 - `globe.js` draws the rotatable Moon and handles picking (`window.LunarGlobe`).
 - `terrain.js` is the measured LOLA horizon profiles (`window.LUNAR_TERRAIN`), generated offline by `tools/`.
+- `validation.js` is a recorded run of `test/validate.mjs` (`window.LUNAR_VALIDATION`), so the agreement with Horizons is shown in the interface instead of only claimed in this file. Nothing in it is computed by the page.
 - `app.js` is the shell: state, controls, metrics, and the text.
 
-`terrain.js` is a script rather than a JSON file on purpose: `fetch()` of a local file is blocked over `file://`, and opening `index.html` by double-clicking it has to keep working.
+`terrain.js` and `validation.js` are scripts rather than JSON files on purpose: `fetch()` of a local file is blocked over `file://`, and opening `index.html` by double-clicking it has to keep working.
 
 All times in the interface are UTC and labelled as such. The landing date and time inputs are UTC, not the local zone of the machine.
 
@@ -40,6 +53,18 @@ Fifteen of the thirty catalogue sites lie within a few degrees of the south pole
 The globe is a hand-drawn orthographic projection on a 2D canvas, not WebGL. That is deliberate: a WebGL texture loaded from a `file://` URL is treated as cross-origin and cannot be uploaded, which would break the double-click-to-open requirement.
 
 **Expert** is the full console: the site list, the horizon strip, the mission chart, the comparison table, the horizon and array controls, the date scan, and the CSV export. Nothing is removed in Simple mode, only hidden, and the mode is carried in the URL hash as `ui=simple` or `ui=expert`.
+
+### The three findings
+
+Above the view are three buttons. Each one sets the site, landing epoch, mission length, and mask to a scenario, flies the globe to it, and writes a short reading underneath. Every figure in that reading is pulled from the model that was just computed, not from a stored string, so the text cannot drift away from the engine.
+
+- **The rim that eats the Sun** — Shackleton, computed twice. The smooth-sphere counterfactual is calculated on the spot at mask 0, so the 100% versus 48% comparison is two live runs of the same engine with and without the LOLA profile.
+- **A whole lunar day of sunlight** — Mons Mouton holds the Sun for the entire window, and the reading names the date and bearing where the solar limb comes closest to the skyline. The tool will not print 100% without that margin.
+- **Where Earth never rises** — Chang'e 4, where Earth's altitude never rises above −38°, against Slater Plain, where libration lifts Earth over the horizon for about a third of the month despite being past the mean-Earth hemisphere.
+
+The active finding rides the URL hash as `st=rim`, `st=margin`, or `st=silence`, so each one is a shareable link. Picking any site by hand clears it.
+
+Below the view, **Where the data comes from, and how it was checked** lists the four NASA and NASA-derived inputs the tool depends on, what each one is load-bearing for, and the full Horizons comparison table with the per-case deltas.
 
 ### Controls worth knowing
 
