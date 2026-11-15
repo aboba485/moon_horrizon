@@ -295,6 +295,8 @@
      moment the mission does. Clearing them here means every caller is covered. */
   function dropCache() {
     cache = {};
+    eventCache = {};
+    eclipseCache = {};
     state.solve = null;
   }
 
@@ -310,30 +312,6 @@
     if (which === "sun") return sample.sunAlt + sample.sunRadius - maskOf(sample, "maskSun", mask);
     if (which === "earth") return sample.earthAlt + sample.earthRadius - maskOf(sample, "maskEarth", mask);
     return sample.stationAlt - maskOf(sample, "maskLink", mask);
-  }
-
-  var EVENT_KEYS = ["sunset", "sunrise", "earthset", "earthrise", "linkDown", "linkUp"];
-
-  /* LunarEph.eventsFromSamples returns {sunset, sunrise, earthset, earthrise,
-     linkDown, linkUp}, each null or {t, kind}. It only fills the direction implied
-     by the clearance at the playhead, so a null is not an answer and we fall back
-     to walking the samples with the same clearance definitions. */
-  function engineEvents(samples, fromMs, mask) {
-    var fn = window.LunarEph && LunarEph.eventsFromSamples;
-    if (typeof fn !== "function") return null;
-    var out;
-    try {
-      out = fn(samples, fromMs, mask);
-    } catch (err) {
-      return null;
-    }
-    if (!out || typeof out !== "object") return null;
-    var usable = EVENT_KEYS.every(function (key) {
-      if (!(key in out)) return false;
-      var value = out[key];
-      return value === null || (value && isFinite(value.t));
-    });
-    return usable ? out : null;
   }
 
   /* Azimuth wraps at 360, so interpolate along the shortest arc. A sunset at
@@ -372,115 +350,78 @@
     return null;
   }
 
-  function eventKeyFor(which, wantRise) {
-    if (which === "sun") return wantRise ? "sunrise" : "sunset";
-    if (which === "earth") return wantRise ? "earthrise" : "earthset";
-    return wantRise ? "linkUp" : "linkDown";
-  }
+  /* LunarEph.horizonEvents bisects the real contact time instead of interpolating
+     between samples, and it reports the azimuth there. It costs a scan of the
+     window, so the whole list is computed once per mission and then only indexed:
+     during Play the readout redraws every few frames and must not pay for this. */
+  var eventCache = {};
 
-  function azAt(samples, t, which) {
-    for (var i = 0; i < samples.length - 1; i++) {
-      if (t >= samples[i].t && t <= samples[i + 1].t) {
-        var span = samples[i + 1].t - samples[i].t;
-        var f = span === 0 ? 0 : (t - samples[i].t) / span;
-        return lerpAz(azOf(samples[i], which), azOf(samples[i + 1], which), f);
+  function eventsFor(entry, which) {
+    var key = [
+      entry.lat, entry.lon, state.landingMs, missionMs(), state.maskDeg,
+      terrainFor(entry.site) ? "lola" : "flat", which
+    ].join("|");
+    if (!(key in eventCache)) {
+      try {
+        eventCache[key] = LunarEph.horizonEvents(new Date(state.landingMs), missionMs(),
+          entry.lat, entry.lon, { maskDeg: maskFor(entry.site), body: which });
+      } catch (err) {
+        eventCache[key] = null;
       }
     }
-    return null;
+    return eventCache[key];
   }
 
   /* -> {kind, t, azDeg} or null. Null is a real answer: at Shackleton the Sun may
-     not set inside the window, and on the far side Earth never rises at all. */
-  function nextCrossing(samples, fromMs, which, mask, wantRise) {
-    var fromEngine = engineEvents(samples, fromMs, mask);
-    if (fromEngine) {
-      var hit = fromEngine[eventKeyFor(which, wantRise)];
-      if (hit && isFinite(hit.t) && hit.t >= fromMs) {
-        return {
-          kind: wantRise ? "rise" : "set",
-          t: hit.t,
-          azDeg: azAt(samples, hit.t, which)
-        };
-      }
+     not set inside the window, and on the far side Earth never rises at all.
+
+     The link is not a body. A DSN complex counts only when it clears the skyline
+     on its own bearing, which the engine's body search cannot express, so that
+     channel still walks the samples. */
+  function nextCrossing(entry, which, wantRise) {
+    if (which !== "sun" && which !== "earth") {
+      return walkCrossing(entry.samples, state.playheadMs, which, state.maskDeg, wantRise);
     }
-    return walkCrossing(samples, fromMs, which, mask, wantRise);
+    var list = eventsFor(entry, which);
+    if (!list) return walkCrossing(entry.samples, state.playheadMs, which, state.maskDeg, wantRise);
+    var want = wantRise ? "rise" : "set";
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].t >= state.playheadMs && list[i].kind === want) return list[i];
+    }
+    return null;
   }
 
   /* ---------- eclipses ----------
 
      Seen from the Moon, a lunar eclipse is a SOLAR eclipse: Earth crosses in
-     front of the Sun. The engine's sunFrac only models the skyline occulting the
-     Sun, so without this an eclipse reads as full power.
+     front of the Sun. LunarEph.findEclipses drives the vendor's eclipse search
+     and bisects the real contacts, so it does not depend on how finely the
+     mission happens to be sampled. Memoised because three renderers ask. */
 
-     Everything needed is already on every sample: both angular radii, and both
-     alt/az pairs. Session A is bringing LunarEph.eclipseAt with the same
-     meaning; when it lands, delete this and call it. */
+  var eclipseCache = {};
 
-  var RAD = Math.PI / 180;
-
-  function angularSep(az1, alt1, az2, alt2) {
-    var c1 = Math.cos(alt1 * RAD);
-    var c2 = Math.cos(alt2 * RAD);
-    var dot = c1 * c2 * Math.cos((az1 - az2) * RAD) + Math.sin(alt1 * RAD) * Math.sin(alt2 * RAD);
-    return Math.acos(clamp(dot, -1, 1)) / RAD;
-  }
-
-  /* Fraction of the solar disk's AREA hidden behind Earth's disk: the overlap of
-     two circles over the area of the smaller one. */
-  function overlapFraction(d, R, r) {
-    if (!(R > 0) || !(r > 0)) return 0;
-    if (d >= R + r) return 0;
-    if (d <= R - r) return 1;
-    if (d <= r - R) return (R * R) / (r * r);
-    var a = r * r * Math.acos(clamp((d * d + r * r - R * R) / (2 * d * r), -1, 1));
-    var b = R * R * Math.acos(clamp((d * d + R * R - r * r) / (2 * d * R), -1, 1));
-    var c = 0.5 * Math.sqrt(Math.max(0,
-      (-d + r + R) * (d + r - R) * (d - r + R) * (d + r + R)));
-    return clamp((a + b - c) / (Math.PI * r * r), 0, 1);
-  }
-
-  function eclipseAt(sample) {
-    var sep = angularSep(sample.sunAz, sample.sunAlt, sample.earthAz, sample.earthAlt);
-    var obs = overlapFraction(sep, sample.earthRadius, sample.sunRadius);
-    var kind = "none";
-    if (obs >= 1) kind = "total";
-    else if (obs > 0) kind = "partial";
-    return { sepDeg: sep, obscuration: obs, kind: kind };
-  }
-
-  /* Contiguous runs of obscuration > 0, with the peak inside each run. */
-  function eclipsesIn(samples) {
-    var out = [];
-    var open = null;
-    for (var i = 0; i < samples.length; i++) {
-      var e = eclipseAt(samples[i]);
-      if (e.obscuration > 0) {
-        if (!open) open = { startMs: samples[i].t, peakMs: samples[i].t, endMs: samples[i].t, maxObscuration: 0, kind: "partial" };
-        open.endMs = samples[i].t;
-        if (e.obscuration > open.maxObscuration) {
-          open.maxObscuration = e.obscuration;
-          open.peakMs = samples[i].t;
-          open.kind = e.kind;
-        }
-      } else if (open) {
-        out.push(open);
-        open = null;
+  function eclipsesFor(entry) {
+    var key = [entry.lat, entry.lon, state.landingMs, missionMs()].join("|");
+    if (!(key in eclipseCache)) {
+      try {
+        eclipseCache[key] = LunarEph.findEclipses(new Date(state.landingMs), missionMs(), entry.lat, entry.lon);
+      } catch (err) {
+        eclipseCache[key] = [];
       }
     }
-    if (open) out.push(open);
-    return out;
+    return eclipseCache[key];
   }
 
-  /* Watt-hours the mission total over-counts, because the engine's lit fraction
-     does not know about Earth. Trapezoid over the samples inside the run. */
+  /* Watt-hours the eclipse costs. The engine already removes them from `power`,
+     so the loss is the gap against the unobscured figure it also reports. */
   function eclipseEnergyLoss(samples, run) {
     var wh = 0;
     for (var i = 0; i < samples.length - 1; i++) {
       var a = samples[i];
       var b = samples[i + 1];
       if (b.t < run.startMs || a.t > run.endMs) continue;
-      var lossA = a.power * eclipseAt(a).obscuration;
-      var lossB = b.power * eclipseAt(b).obscuration;
+      var lossA = a.powerWithoutEclipse - a.power;
+      var lossB = b.powerWithoutEclipse - b.power;
       wh += (lossA + lossB) / 2 * ((b.t - a.t) / HOUR);
     }
     return wh;
@@ -489,66 +430,20 @@
   /* ---------- inverse position ----------
 
      The forward question is "where is the Sun at time T". A planner asks the
-     inverse: "when is the Sun where I need it". Session A is bringing
-     LunarEph.solveFor; this walks the samples the mission already computed. */
+     inverse: "when is the Sun where I need it". LunarEph.solveFor brackets the
+     roots on its own grid and then bisects, so the answer does not depend on how
+     finely this mission happens to be sampled.
 
-  function altOf(sample, which) {
-    return which === "sun" ? sample.sunAlt : sample.earthAlt;
-  }
-
-  /* Signed miss distance from the target, in degrees. Either axis may be null,
-     meaning "do not constrain this one". */
-  function solveMiss(sample, which, target) {
-    if (target.altDeg !== null && target.azDeg !== null) {
-      return angularSep(azOf(sample, which), altOf(sample, which), target.azDeg, target.altDeg);
-    }
-    if (target.altDeg !== null) return altOf(sample, which) - target.altDeg;
-    return ((azOf(sample, which) - target.azDeg + 540) % 360) - 180;
-  }
-
-  function solveFor(samples, which, target) {
-    var both = target.altDeg !== null && target.azDeg !== null;
-    var hits = [];
-    var i;
-    if (both) {
-      /* Two constraints rarely have an exact root, so report closest approach:
-         any sample that is a local minimum of the separation. */
-      for (i = 1; i < samples.length - 1; i++) {
-        var p = solveMiss(samples[i - 1], which, target);
-        var q = solveMiss(samples[i], which, target);
-        var r = solveMiss(samples[i + 1], which, target);
-        if (q <= p && q <= r) {
-          hits.push({
-            t: samples[i].t,
-            azDeg: azOf(samples[i], which),
-            altDeg: altOf(samples[i], which),
-            missDeg: q,
-            exact: q < 0.25
-          });
-        }
-      }
-    } else {
-      for (i = 0; i < samples.length - 1; i++) {
-        var a = solveMiss(samples[i], which, target);
-        var b = solveMiss(samples[i + 1], which, target);
-        if (a === 0 || (a < 0) !== (b < 0)) {
-          /* An azimuth miss jumps 180 -> -180 at the antipode; that sign change
-             is the wrap, not a crossing. */
-          if (Math.abs(b - a) > 180) continue;
-          var span = b - a;
-          var f = clamp(span === 0 ? 0 : (0 - a) / span, 0, 1);
-          var step = samples[i + 1].t - samples[i].t;
-          hits.push({
-            t: samples[i].t + step * f,
-            azDeg: lerpAz(azOf(samples[i], which), azOf(samples[i + 1], which), f),
-            altDeg: altOf(samples[i], which) + (altOf(samples[i + 1], which) - altOf(samples[i], which)) * f,
-            missDeg: 0,
-            exact: true
-          });
-        }
-      }
-    }
-    hits.sort(function (x, y) { return x.t - y.t; });
+     It throws RangeError on a target it cannot represent rather than returning
+     an empty list, because "no such elevation exists" and "it never happens
+     here" are different answers and the user needs to be told which. */
+  function solveSun(entry, target) {
+    var hits = LunarEph.solveFor(new Date(state.landingMs), missionMs(), entry.lat, entry.lon, {
+      body: "sun",
+      altDeg: target.altDeg,
+      azDeg: target.azDeg,
+      maskDeg: maskFor(entry.site)
+    });
     return hits.slice(0, 12);
   }
 
@@ -662,9 +557,9 @@
   /* "Sunset in 3 d 14 h, at azimuth 274" is the line the brief calls critical
      operational information. A null is printed as a sentence, never as a blank:
      "the Sun does not set here" is an answer, and at the pole it is the answer. */
-  function eventLine(mission, now, which) {
+  function eventLine(entry, now, which) {
     var isUp = which === "sun" ? now.lit : now.dte;
-    var hit = nextCrossing(mission.samples, state.playheadMs, which, state.maskDeg, !isUp);
+    var hit = nextCrossing(entry, which, !isUp);
     var label = which === "sun" ? (isUp ? "Sunset" : "Sunrise") : (isUp ? "Link loss" : "Link return");
     if (!hit) {
       var body = which === "sun" ? "the Sun" : "the link";
@@ -672,17 +567,32 @@
         (isUp ? "up" : "down") + " for the whole window";
     }
     var az = isFinite(hit.azDeg) ? ", at " + azDeg(hit.azDeg) + " az" : "";
+    var over = isFinite(hit.azDeg) ? featureLabel(entry, hit.azDeg) : "";
     return label + " in " + msHours(hit.t - state.playheadMs) + az +
-      " \u00b7 " + utcStamp(hit.t);
+      (over ? " over " + over : "") + " \u00b7 " + utcStamp(hit.t);
+  }
+
+  /* "at 274 az" is a number; "at 274 az over Shackleton" is a place. The IAU
+     gazetteer is matched against the LOLA skyline bin on that bearing, so this
+     names the feature the body actually crosses, not the nearest crater. Null
+     for a site with no measured profile, and the caller then says nothing. */
+  function featureLabel(entry, azimuthDeg) {
+    if (!entry.terrain) return "";
+    var f = LunarEph.featureAtAzimuth(entry.lat, entry.lon, azimuthDeg, { maskDeg: maskFor(entry.site) });
+    if (!f || !f.name) return "";
+    /* A site perched on its own massif is its own skyline on a third of the
+       bearings, so "0 km" is a real reading and has to be said in words. */
+    var km = f.distanceKm;
+    return f.name + ", " + (km < 1 ? "under a km out" :
+      (km < 10 ? km.toFixed(1) : km.toFixed(0)) + " km out");
   }
 
   function eclipseLine(entry) {
-    var e = eclipseAt(entry.now);
-    if (e.obscuration > 0) {
-      return "<dt>Eclipse</dt><dd class=\"alert\">Earth is covering " + pct(e.obscuration) +
-        " of the Sun \u00b7 " + esc(e.kind) + "</dd>";
+    if (entry.now.eclipseObscuration > 0) {
+      return "<dt>Eclipse</dt><dd class=\"alert\">Earth is covering " + pct(entry.now.eclipseObscuration) +
+        " of the Sun \u00b7 " + esc(entry.now.eclipseKind) + "</dd>";
     }
-    var list = eclipsesIn(entry.samples).filter(function (x) { return x.peakMs >= state.playheadMs; });
+    var list = eclipsesFor(entry).filter(function (x) { return x.peakMs >= state.playheadMs; });
     if (!list.length) {
       return "<dt>Eclipse</dt><dd>None ahead in this window \u00b7 Earth transits the Sun about twice a year</dd>";
     }
@@ -705,12 +615,13 @@
     if (now.lit && now.sunAlt < 1 && now.sunAlt > -1) {
       notes.push("The Sun is part-risen: only a slice of the disk clears the mask.");
     }
-    var ecl = eclipseAt(now);
-    if (ecl.obscuration > 0) {
-      notes.push("Earth is in front of the Sun, and the watts above do not know it: the engine\u2019s lit " +
-        "fraction models the horizon mask, not Earth. Scale the power by " +
-        (1 - ecl.obscuration).toFixed(2) + " for this instant.");
+    if (now.eclipseObscuration > 0) {
+      notes.push("Earth is in front of the Sun. The watts above already carry that: " +
+        now.powerWithoutEclipse.toFixed(0) + " W/m\u00b2 of unobscured sunlight scaled by " +
+        (1 - now.eclipseObscuration).toFixed(2) + ".");
     }
+    var skyline = featureLabel(primary, now.sunAz);
+    if (skyline) notes.push("On the Sun\u2019s bearing the skyline is " + skyline + ".");
 
     el("readout").innerHTML =
       '<div class="kicker">Playhead \u00b7 UTC</div>' +
@@ -803,34 +714,37 @@
     }
 
     if (state.story === "eclipse") {
-      var list = eclipsesIn(entry.samples);
+      var list = eclipsesFor(entry);
       if (!list.length) {
         return "<h3>No eclipse in this window</h3><p>Nothing covers the Sun here between " +
           utcStamp(state.landingMs) + " and the end of the window.</p>";
       }
       var ec = list[0];
-      var peak = entry.samples.reduce(function (best, s) {
-        return Math.abs(s.t - ec.peakMs) < Math.abs(best.t - ec.peakMs) ? s : best;
-      }, entry.samples[0]);
-      var at = eclipseAt(peak);
+      /* Read the peak from the engine at the bisected contact time, not from the
+         nearest sample: the whole event is shorter than a coarse grid step. */
+      var at = LunarEph.eclipseAt(new Date(ec.peakMs), entry.lat, entry.lon);
+      var peak = LunarEph.evaluate(new Date(ec.peakMs), entry.lat, entry.lon,
+        maskFor(entry.site), panelSpec());
       return "<h3>Earth covers " + '<span class="figure">' + pct(ec.maxObscuration) +
         "</span> of the Sun on " + utcStamp(ec.peakMs) + "</h3>" +
         "<p>Seen from Earth this is a lunar eclipse. Seen from the ground at " + esc(entry.name) +
         " it is a <b>solar</b> eclipse: Earth passes in front of the Sun. At peak the two are " +
         '<span class="figure">' + deg(at.sepDeg, 3) + "</span> apart in the sky, inside Earth\u2019s " +
-        deg(peak.earthRadius, 2) + " disk, and the whole event runs " +
+        deg(at.earthRadiusDeg, 2) + " disk, and the whole event runs " +
         msHours(ec.endMs - ec.startMs) + ".</p>" +
         "<p>For a solar-powered lander this is the one total outage you can predict years ahead " +
         "and size a battery for. The Sun is at " + deg(peak.sunAlt, 1) + " altitude and " +
-        azDeg(peak.sunAz) + " azimuth when it happens, so there is nowhere to point an array to avoid it.</p>" +
+        azDeg(peak.sunAz) + " azimuth when it happens, so there is nowhere to point an array to avoid it. " +
+        "The array reads " + peak.power.toFixed(0) + " W/m\u00b2 at peak against " +
+        peak.powerWithoutEclipse.toFixed(0) + " without the eclipse, and the mission total is " +
+        '<span class="figure">' + energy(eclipseEnergyLoss(entry.samples, ec)) +
+        "/m\u00b2</span> lighter for it.</p>" +
         "<p>It is also a free check on the whole engine. An eclipse <em>is</em> Sun and Earth at the " +
         "same place in the sky, and this tool computes those two directions by completely separate paths. " +
         "They agree to " + deg(at.sepDeg, 3) + ". No sign error in the lunar rotation survives that.</p>" +
-        "<p class=\"margin-note\">Known limit: the power and sunlight figures elsewhere on this page still " +
-        "read " + pct(peak.sunFrac) + " of the disk at peak, because the engine\u2019s lit fraction models the " +
-        "horizon mask occulting the Sun and not Earth occulting it. The eclipse geometry above is right; " +
-        "the energy total over this window is optimistic by " +
-        energy(eclipseEnergyLoss(entry.samples, ec)) + "/m\u00b2.</p>";
+        "<p class=\"margin-note\">The event is four hours long and this window is sampled far more coarsely " +
+        "than that, so the engine injects the contact times and five-minute samples through the eclipse " +
+        "rather than stepping over it. The grid you pick does not change the answer.</p>";
     }
 
     if (state.story === "silence") {
@@ -949,6 +863,11 @@
         "<dt>Skyline</dt><dd>" + (prof
           ? deg(prof.min, 1) + " to " + deg(prof.max, 1) + ", LOLA"
           : "uniform " + deg(state.maskDeg, 1) + " mask") + "</dd>" +
+        /* Which named feature the Sun is about to go behind is the question the
+           altitude number is standing in for. */
+        (featureLabel(entry, now.sunAz)
+          ? "<dt>On that bearing</dt><dd>" + esc(featureLabel(entry, now.sunAz)) + "</dd>"
+          : "") +
         "<dt>Sun now</dt><dd>" + deg(now.sunAlt) + " alt \u00b7 " + azDeg(now.sunAz) + " az</dd>" +
         "<dt>Earth now</dt><dd>" + deg(now.earthAlt) + " alt \u00b7 " + (now.dte ? "link up" : "no link") + "</dd>" +
         "<dt>Next</dt><dd>" + esc(eventLine(entry, now, "sun")) + "</dd>" +
@@ -1164,7 +1083,8 @@
         return '<button type="button" data-solve="' + Math.round(hit.t) + '">' +
           "<b>" + utcStamp(hit.t) + "</b><span>" + deg(hit.altDeg) + " alt \u00b7 " +
           azDeg(hit.azDeg) + " az \u00b7 " + msHours(hit.t - state.landingMs) + " after landing" +
-          (hit.exact ? "" : " \u00b7 closest approach " + deg(hit.missDeg, 2)) +
+          (hit.exact ? "" : " \u00b7 closest approach " + deg(hit.separationDeg, 2)) +
+          (hit.aboveHorizon ? "" : " \u00b7 behind the skyline") +
           "</span></button>";
       }).join("");
   }
@@ -1184,11 +1104,17 @@
       var parts = [];
       if (wantAlt !== null) parts.push("elevation " + deg(wantAlt, 1));
       if (wantAz !== null) parts.push("azimuth " + azDeg(wantAz));
-      state.solve = {
-        message: null,
-        label: "Sun at " + parts.join(" and "),
-        hits: solveFor(lastModel.sites[0].samples, "sun", { altDeg: wantAlt, azDeg: wantAz })
-      };
+      try {
+        state.solve = {
+          message: null,
+          label: "Sun at " + parts.join(" and "),
+          hits: solveSun(lastModel.sites[0], { altDeg: wantAlt, azDeg: wantAz })
+        };
+      } catch (err) {
+        /* The engine rejects a target it cannot represent at all, which is a
+           different answer from "it never happens here" and is said differently. */
+        state.solve = { message: err.message };
+      }
     }
     renderSolve();
   }
@@ -1198,7 +1124,7 @@
      window: eclipses come about twice a year, not twice a lunar day. */
   function syncEclipseButton(model) {
     var button = el("eclipse-btn");
-    var list = eclipsesIn(model.sites[0].samples);
+    var list = eclipsesFor(model.sites[0]);
     button.disabled = !list.length;
     button.title = list.length
       ? "Jump to " + utcStamp(list[0].peakMs) + ", when Earth covers " +
@@ -1208,7 +1134,7 @@
 
   function jumpToEclipse() {
     if (!lastModel || !lastModel.sites.length) return;
-    var list = eclipsesIn(lastModel.sites[0].samples);
+    var list = eclipsesFor(lastModel.sites[0]);
     if (!list.length) return;
     var next = null;
     for (var i = 0; i < list.length; i++) {

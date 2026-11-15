@@ -28,17 +28,18 @@ cd moon_horrizon
 open index.html        # or double-click it
 ```
 
-Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `ephemeris.js`, `viz.js`, `globe.js`, `terrain.js`, `validation.js`, `app.js`.
+Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `features.js`, `ephemeris.js`, `viz.js`, `globe.js`, `terrain.js`, `validation.js`, `app.js`.
 
 - `ephemeris.js` is the sky math (`window.LunarEph`).
 - `sites.js` is the site catalogue (`window.LUNAR_SITES`, `window.LUNAR_GROUPS`).
+- `features.js` is the IAU/USGS named-feature catalogue and the per-bearing witness for each LOLA skyline (`window.LUNAR_FEATURES`). It loads before `ephemeris.js` because `featureAtAzimuth` reads it.
 - `viz.js` draws the horizon, the chart, and the map (`window.LunarViz`).
 - `globe.js` draws the rotatable Moon and handles picking (`window.LunarGlobe`).
 - `terrain.js` is the measured LOLA horizon profiles (`window.LUNAR_TERRAIN`), generated offline by `tools/`.
 - `validation.js` is a recorded run of `test/validate.mjs` (`window.LUNAR_VALIDATION`), so the agreement with Horizons is shown in the interface instead of only claimed in this file. Nothing in it is computed by the page.
 - `app.js` is the shell: state, controls, metrics, and the text.
 
-`terrain.js` and `validation.js` are scripts rather than JSON files on purpose: `fetch()` of a local file is blocked over `file://`, and opening `index.html` by double-clicking it has to keep working.
+`features.js`, `terrain.js`, and `validation.js` are scripts rather than JSON files on purpose: `fetch()` of a local file is blocked over `file://`, and opening `index.html` by double-clicking it has to keep working.
 
 All times in the interface are UTC and labelled as such. The landing date and time inputs are UTC, not the local zone of the machine.
 
@@ -69,11 +70,13 @@ The active finding rides the URL hash as `st=rim`, `st=margin`, `st=silence`, or
 
 **When the next thing happens, and on what bearing.** The readout's *Next* rows give a countdown to the next sunrise or sunset and to the next loss or return of the direct link, each with the **azimuth** the body will be at when it crosses. A bearing is operational information — it is where the array has to be pointing and where the ridge that matters is. Azimuth is interpolated along the shortest arc across the 0°/360° seam, so a crossing due north reports north rather than south. When there is no crossing inside the window the row says so in a sentence: *"Sunset: never — the Sun stays up for the whole window."* At a polar site that is not a missing answer, it is the answer.
 
-**Find a Sun position.** The inverse question. Give an elevation, an azimuth, or both, and the tool lists every time inside the mission that matches, with the bearing and the time after landing; clicking a result moves the playhead there. With one axis constrained the crossing is found by interpolating a sign change, so the time is exact. With both constrained it reports closest approach instead, with the miss distance, because two constraints rarely have an exact root. Nothing matching is printed as a sentence rather than an empty list.
+**Find a Sun position.** The inverse question. Give an elevation, an azimuth, or both, and the tool lists every time inside the mission that matches, with the bearing and the time after landing; clicking a result moves the playhead there. The roots are bracketed on the engine's own grid and then bisected, so the answer does not depend on how coarsely the mission happens to be sampled. With both axes constrained it reports closest approach instead, with the separation, because two constraints rarely have an exact root — and it marks a hit that falls behind the measured skyline, since a Sun at the right angle you cannot see is not an answer. A target the geometry cannot represent at all is said differently from one that simply never happens here.
 
-**Eclipses.** From the surface of the Moon, a lunar eclipse is a solar eclipse: Earth passes in front of the Sun. The tool computes the angular separation between the two bodies and the circle–circle overlap of their disks for every sample, so obscuration is an area fraction and not a yes/no. **Next eclipse** jumps the playhead to the peak; it is disabled, with the reason in its tooltip, when there is no eclipse at this site inside the window, which is the usual case — eclipses come roughly twice a year, not twice a lunar day.
+**What is on that bearing.** An azimuth is a number; a name is a place. Where a site has a measured LOLA skyline, the rise and set bearings and the Sun's current bearing are matched against the IAU/USGS Gazetteer of Planetary Nomenclature, and the tool names the feature the body actually crosses along with how far out it is. A site perched on its own massif is its own skyline across much of the compass, so "under a km out" is a real reading and is said in words rather than printed as 0 km.
 
-An eclipse is also a free end-to-end check on the whole rotation chain. At peak the Sun and Earth must share both an azimuth and an elevation from any site on the Moon, and the tool derives those two directions by entirely separate paths. On 2026-08-28 at Mons Mouton they agree to 0.604°, inside Earth's 0.94° disk radius. No sign error in the lunar orientation survives that.
+**Eclipses.** From the surface of the Moon, a lunar eclipse is a solar eclipse: Earth passes in front of the Sun. Obscuration is the circle–circle overlap of the two disks as an **area** fraction, not a yes/no, and the contact and peak times are bisected rather than read off the nearest sample — a four-hour event inside a year-long window would otherwise be stepped over entirely. The power model carries it: irradiance is scaled by `1 − obscuration`, so an eclipsed instant reads the watts it actually produces, and the mission energy total is correspondingly lighter. **Next eclipse** jumps the playhead to the peak; it is disabled, with the reason in its tooltip, when there is no eclipse at this site inside the window, which is the usual case — eclipses come roughly twice a year, not twice a lunar day.
+
+An eclipse is also a free end-to-end check on the whole rotation chain. At peak the Sun and Earth must share both an azimuth and an elevation from any site on the Moon, and the tool derives those two directions by entirely separate paths. On 2026-08-28 at Mons Mouton they agree to 0.214°, well inside Earth's 0.94° disk radius. No sign error in the lunar orientation survives that.
 
 **If we slip.** A launch delay is the most common change to a plan, so it is a control rather than something to recompute by hand. Pick an offset — a week or two either way, or a full lunar day — and a table under the comparison runs the same site, array, and mask from the shifted epoch, showing sunlight, energy, direct-to-Earth time, and longest night as *before → after* with the delta. Near the pole two weeks can invert the answer, because it moves the Sun to the other side of the same rim.
 
@@ -106,9 +109,9 @@ Worst angular error on those cases: **0.007°**. The Moon has no atmosphere, so 
 
 **Horizon.** Two modes. With the LOLA skyline on, the horizon is a measured elevation angle for every one of 360 azimuths, different in every direction, and the slider raises or lowers that whole profile. With it off, the horizon is a single number in every direction: 0 is the smooth sphere, a positive mask asks "what if the skyline blocks the first few degrees?", a negative mask asks the opposite, as if the site sits on a peak above its surroundings. See [The LOLA skyline](#the-lola-skyline).
 
-**Sunlight.** A site is lit when any part of the solar disk clears the mask. The lit fraction of the disk is interpolated across the disk radius, so a part-risen Sun counts partially.
+**Sunlight.** A site is lit when any part of the solar disk clears the mask. The lit fraction of the disk is interpolated across the disk radius, so a part-risen Sun counts partially, and it is then scaled by `1 − obscuration` so an eclipse reads as the partial Sun it is.
 
-**Power.** The solar constant of 1361 W/m² at 1 AU, scaled by the Moon–Sun distance, times the cosine of the incidence angle on the chosen array, times cell efficiency, times the lit fraction of the disk:
+**Power.** The solar constant of 1361 W/m² at 1 AU, scaled by the Moon–Sun distance, times the cosine of the incidence angle on the chosen array, times cell efficiency, times the lit fraction of the disk, times `1 − obscuration` during an eclipse:
 
 ```
 cos i = sin(alt) cos(tilt) + cos(alt) sin(tilt) cos(az_panel − az_sun)
@@ -170,6 +173,6 @@ And one result worth reading carefully. Mons Mouton holds the Sun for an entire 
 
 The skyline is binned at one degree of azimuth, so a knife-edge ridge is smoothed. Rays stop at 100 km, so a mountain beyond that is invisible. Sites north of 79°S have no profile at all and fall back to the uniform mask. There is no self-shadowing of local slopes, no light scattered from nearby terrain, and no thermal model. Dust, link budgets, landing hazards, and traverse planning are all outside the model.
 
-**Known limit, stated because the tool will otherwise state it for you.** The engine's lit fraction models the horizon mask occulting the Sun and *not* Earth occulting the Sun, so across an eclipse the power and sunlight totals are optimistic — at the 2026-08-28 peak at Mons Mouton the engine still reads 100% of the disk while Earth is completely covering it. The eclipse geometry and the obscuration fraction are computed correctly and shown; the energy integral is not yet corrected for them. Both the readout at an eclipsed instant and the eclipse finding say so, and name the number: about 1.5 kWh/m² over that event. Do not take an eclipse-spanning energy total at face value.
+An eclipse costs real watt-hours and the engine now charges them: at the 2026-08-28 peak at Mons Mouton the array reads 0 W/m² against 397 unobscured, and the lunar-day energy total is about 1.5 kWh/m² lighter for the event. The obscuration is purely geometric, though: it treats both bodies as uniform hard-edged disks, so it carries no solar limb darkening and no sunlight refracted into the umbra by Earth's atmosphere — the same light that makes an eclipsed Moon look red from here. A real total eclipse is therefore not quite the zero this model reports. Named skyline features come from the gazetteer matched to the LOLA witness ray, which identifies the feature the ray ended on, not necessarily the one a geologist would point at.
 
 Use it to compare sites and dates and to understand why polar geometry is hard. Do not use it as a flight product.

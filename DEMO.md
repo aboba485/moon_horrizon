@@ -55,9 +55,9 @@ The globe flies to the pole, Shackleton is selected, and the reading appears.
 
 **1:50 — click *The one outage you can predict* (25 s).**
 
-> "One more, because it is the only thing in a mission plan you can put a date on. The 28th of August 2026. From Earth that is a lunar eclipse. From the ground at Mons Mouton it is a *solar* eclipse — Earth passes in front of the Sun, covers 100% of it, and the whole event runs four point seven hours.
+> "One more, because it is the only thing in a mission plan you can put a date on. The 28th of August 2026. From Earth that is a lunar eclipse. From the ground at Mons Mouton it is a *solar* eclipse — Earth passes in front of the Sun, covers 100% of it, and the whole event runs four point eight hours. The array goes from 397 watts per square metre to zero, and the lunar-day energy total is one and a half kilowatt-hours lighter for it.
 >
-> And it validates the engine for free. An eclipse is the Sun and Earth at the same place in the sky, and this tool computes those two directions by completely separate paths. They agree to 0.604 degrees, inside Earth's 0.94-degree disk. No sign error in the lunar rotation survives that."
+> And it validates the engine for free. An eclipse is the Sun and Earth at the same place in the sky, and this tool computes those two directions by completely separate paths. They agree to 0.214 degrees, well inside Earth's 0.94-degree disk. No sign error in the lunar rotation survives that."
 
 **2:15 — close (10 s).**
 
@@ -113,7 +113,7 @@ Do not skip this. It is the difference between a tool and a demo.
 
 > "Azimuth is binned at one degree, so a knife-edge ridge is smoothed. Rays stop at 100 kilometres. Sites north of 79 south have no profile at all and fall back to a uniform mask. There is no self-shadowing, no scattered light, no thermal model, no link budget. A half-degree margin is a question for a real terrain study, not an answer.
 >
-> And one we found in our own engine: the lit fraction models the horizon blocking the Sun, not Earth blocking the Sun. So across an eclipse the energy total is optimistic — about 1.5 kilowatt-hours per square metre at Mouton on the 28th of August. The geometry is right, the integral is not corrected yet, and the app says so itself rather than letting you find out."
+> And one that is left even after we fixed the obvious one: the eclipse obscuration treats the Sun and Earth as hard-edged uniform disks, so there is no limb darkening and no sunlight bent into the umbra by Earth's atmosphere — the light that makes an eclipsed Moon red from here. A real total eclipse is not quite the zero we print. The app says all of this itself rather than letting you find out."
 
 ---
 
