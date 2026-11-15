@@ -160,15 +160,17 @@
         <div class="simple-card" id="simple-card"></div>
       </section>
 
-      <section class="hero" aria-label="Horizon view">
-        <canvas id="horizon" width="1200" height="880"></canvas>
-        <div class="readout" id="readout"></div>
-        <div class="legend">
-          <span><i class="swatch sun"></i>Sun, true angular size when the scale is zoomed</span>
-          <span><i class="swatch earth"></i>Earth, about 2° across</span>
-          <span><i class="swatch mask"></i>Horizon mask</span>
-          <span>North is centered. Azimuth runs eastward.</span>
+      <section class="hero-row" aria-label="Horizon view">
+        <div class="hero">
+          <canvas id="horizon" width="1200" height="880"></canvas>
+          <div class="legend">
+            <span><i class="swatch sun"></i>Sun, true angular size when the scale is zoomed</span>
+            <span><i class="swatch earth"></i>Earth, about 2° across</span>
+            <span><i class="swatch mask"></i>Horizon mask</span>
+            <span>North is centered. Azimuth runs eastward.</span>
+          </div>
         </div>
+        <div class="readout" id="readout"></div>
       </section>
 
       <section class="metrics" id="metrics" aria-label="Mission metrics"></section>

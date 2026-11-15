@@ -117,7 +117,7 @@ h1 {
 .simple { display: none; }
 .app.mode-simple { grid-template-columns: minmax(0, 1fr); }
 .app.mode-simple aside,
-.app.mode-simple .hero,
+.app.mode-simple .hero-row,
 .app.mode-simple .metrics,
 .app.mode-simple #compare,
 .app.mode-simple #slip-table,
@@ -385,6 +385,16 @@ input[type="range"] { width: 100%; accent-color: var(--sun); }
 }
 .primary-btn.playing { background: var(--ink); }
 
+/* The readout sits beside the sky, not on top of it. It used to be an overlay
+   pinned to the bottom-left corner, which was fine until the mission had
+   something to say: the panel grows with its notes, and at full height it was
+   taller than the 440px canvas and covered the horizon it was describing. */
+.hero-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+}
 .hero {
   position: relative;
   background: linear-gradient(180deg, #12110e, #1a1814 70%, #241e16);
@@ -395,19 +405,15 @@ input[type="range"] { width: 100%; accent-color: var(--sun); }
 }
 #horizon { width: 100%; height: 440px; display: block; }
 .readout {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  max-width: min(460px, calc(100% - 28px));
   padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(12, 11, 9, 0.82);
+  border-radius: 16px;
+  background: var(--panel);
   border: 1px solid var(--line);
-  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
 }
 .readout .kicker { color: var(--sun); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
 .readout h2 { margin: 2px 0 8px; font-size: 18px; letter-spacing: -0.02em; }
-.readout dl { display: grid; grid-template-columns: 92px 1fr; gap: 3px 8px; margin: 0; }
+.readout dl { display: grid; grid-template-columns: 76px 1fr; gap: 3px 8px; margin: 0; }
 .readout dt { color: var(--muted); }
 .readout dd { margin: 0; font-family: var(--mono); font-size: 12.5px; }
 .readout dd.alert, .simple-card dd.alert { color: var(--warn); }
@@ -565,6 +571,7 @@ footer summary { cursor: pointer; color: var(--muted); }
 @media (max-width: 1100px) {
   .metrics { grid-template-columns: 1fr 1fr; }
   .split { grid-template-columns: 1fr; }
+  .hero-row { grid-template-columns: minmax(0, 1fr); }
   .app.mode-simple .simple { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 860px) {
