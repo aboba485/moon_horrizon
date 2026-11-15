@@ -1,49 +1,63 @@
 #!/bin/sh
 # Rebuild basemap.js from the NASA SVS CGI Moon Kit colour mosaic.
 #
-# The mosaic has to be a data: URI rather than an .jpg next to the page,
+# The mosaic has to be a data: URI rather than a .jpg next to the page,
 # because globe.js shades the terminator with getImageData and a file:// page
 # loading a sibling image taints the canvas. A data: URI is same-origin, so it
 # cannot. That is the whole reason this script exists.
 #
-# 4096 x 2048 is set by how far the globe zooms. The globe resamples the mosaic
+# 8192 x 4096 is set by how far the globe zooms. The globe resamples the mosaic
 # into a screen-sized buffer, so at 4x zoom about 34 degrees of longitude is
-# spread across roughly 1300 device pixels; 2048 wide gave 190 source pixels for
-# that and the Moon went soft. 4096 roughly halves the shortfall for about an
-# extra 750 kB, and quality 45 rather than 55 pays part of that back without
-# anything visible, because the image is being magnified rather than examined
-# at its own scale.
+# spread across roughly 1300 device pixels. 4096 wide gave about 390 source
+# pixels for that, so the sphere was being magnified more than 3x and read as
+# soft. 8192 halves that to about 1.6x, which is close enough to 1:1 that the
+# limit the eye meets is the WAC mosaic itself rather than our upsampling.
+#
+# 16384 is published too and is not worth it: decoded it is a 537 MB ImageData,
+# which is the buffer globe.js samples every rebuild, and WebP cannot even
+# encode it (its maximum dimension is 16383).
+#
+# WebP rather than JPEG because the whole plate has to travel inside the page.
+# At matched visual quality WebP lands near a third of JPEG here, which is what
+# makes 4x the pixels cost only about 750 kB: 8k WebP q50 is 1.5 MB where 8k
+# JPEG q45 was 3.4 MB. Encoding is done with Python and Pillow because sips
+# writes no WebP and cwebp is not something this machine is assumed to have.
 #
 # Source page: https://svs.gsfc.nasa.gov/4720
 # LRO LROC WAC mosaic, NASA/GSFC/Arizona State University, public domain.
 #
-# Needs curl, sips (macOS) and base64.
+# Needs curl, base64, and python3 with Pillow.
 
 set -e
 here="$(dirname "$0")"
-src="https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_4k.tif"
+src="https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_8k.tif"
 work="$here/../data/basemap"
 out="$here/../basemap.js"
-quality=45
+quality=50
 
 mkdir -p "$work"
-if [ -f "$work/lroc_4k.tif" ]; then
-  echo "have lroc_4k.tif"
+if [ -f "$work/lroc_8k.tif" ]; then
+  echo "have lroc_8k.tif"
 else
-  echo "fetching lroc_color_poles_4k.tif"
-  curl -# -o "$work/lroc_4k.tif" "$src"
+  echo "fetching lroc_color_poles_8k.tif"
+  curl -# -o "$work/lroc_8k.tif" "$src"
 fi
 
-w=$(sips -g pixelWidth "$work/lroc_4k.tif" | awk '/pixelWidth/ {print $2}')
-h=$(sips -g pixelHeight "$work/lroc_4k.tif" | awk '/pixelHeight/ {print $2}')
-if [ "$w" != "4096" ] || [ "$h" != "2048" ]; then
-  echo "source is ${w}x${h}, expected 4096x2048" >&2
-  exit 1
-fi
+python3 - "$work/lroc_8k.tif" "$work/moon.webp" "$quality" <<'PY'
+import sys
+from PIL import Image
 
-sips -s format jpeg -s formatOptions "$quality" "$work/lroc_4k.tif" --out "$work/moon.jpg" >/dev/null
-bytes=$(wc -c < "$work/moon.jpg" | tr -d ' ')
-echo "jpeg q$quality: $bytes bytes"
+src, dst, quality = sys.argv[1], sys.argv[2], int(sys.argv[3])
+Image.MAX_IMAGE_PIXELS = None
+im = Image.open(src)
+if im.size != (8192, 4096):
+    sys.exit("source is %dx%d, expected 8192x4096" % im.size)
+# method=6 is the slowest, smallest setting; this runs once per rebuild.
+im.convert("RGB").save(dst, "WEBP", quality=quality, method=6)
+PY
+
+bytes=$(wc -c < "$work/moon.webp" | tr -d ' ')
+echo "webp q$quality: $bytes bytes"
 
 {
   cat <<'HEAD'
@@ -53,18 +67,18 @@ echo "jpeg q$quality: $bytes bytes"
    so drawing or sampling it can never taint a canvas (globe.js reads pixels).
 
    Source: NASA Scientific Visualization Studio, CGI Moon Kit,
-   lroc_color_poles_4k.tif (LRO LROC WAC mosaic, NASA/GSFC/ASU, public domain),
-   https://svs.gsfc.nasa.gov/4720 - recompressed to JPEG, 4096x2048.
+   lroc_color_poles_8k.tif (LRO LROC WAC mosaic, NASA/GSFC/ASU, public domain),
+   https://svs.gsfc.nasa.gov/4720 - recompressed to WebP, 8192x4096.
    Longitude 0 (mean-Earth direction) at the image centre, north up. */
 (function (root) {
   root.LUNAR_BASEMAP = {
-    width: 4096,
-    height: 2048,
+    width: 8192,
+    height: 4096,
     projection: "equirectangular",
     source: "NASA SVS CGI Moon Kit (LROC WAC mosaic), svs.gsfc.nasa.gov/4720",
 HEAD
-  printf '    src: "data:image/jpeg;base64,'
-  base64 < "$work/moon.jpg" | tr -d '\n'
+  printf '    src: "data:image/webp;base64,'
+  base64 < "$work/moon.webp" | tr -d '\n'
   printf '"\n'
   cat <<'TAIL'
   };
