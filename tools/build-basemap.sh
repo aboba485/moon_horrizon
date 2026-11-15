@@ -6,10 +6,13 @@
 # loading a sibling image taints the canvas. A data: URI is same-origin, so it
 # cannot. That is the whole reason this script exists.
 #
-# 2048 x 1024 is not arbitrary: the globe shows one hemisphere, which is half
-# the mosaic's width, and the disc covers roughly a thousand device pixels on a
-# retina screen. Going lower is visibly soft; going higher pays in bytes for
-# detail no one can see.
+# 4096 x 2048 is set by how far the globe zooms. The globe resamples the mosaic
+# into a screen-sized buffer, so at 4x zoom about 34 degrees of longitude is
+# spread across roughly 1300 device pixels; 2048 wide gave 190 source pixels for
+# that and the Moon went soft. 4096 roughly halves the shortfall for about an
+# extra 750 kB, and quality 45 rather than 55 pays part of that back without
+# anything visible, because the image is being magnified rather than examined
+# at its own scale.
 #
 # Source page: https://svs.gsfc.nasa.gov/4720
 # LRO LROC WAC mosaic, NASA/GSFC/Arizona State University, public domain.
@@ -18,27 +21,27 @@
 
 set -e
 here="$(dirname "$0")"
-src="https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_2k.tif"
+src="https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_4k.tif"
 work="$here/../data/basemap"
 out="$here/../basemap.js"
-quality=55
+quality=45
 
 mkdir -p "$work"
-if [ -f "$work/lroc_2k.tif" ]; then
-  echo "have lroc_2k.tif"
+if [ -f "$work/lroc_4k.tif" ]; then
+  echo "have lroc_4k.tif"
 else
-  echo "fetching lroc_color_poles_2k.tif"
-  curl -# -o "$work/lroc_2k.tif" "$src"
+  echo "fetching lroc_color_poles_4k.tif"
+  curl -# -o "$work/lroc_4k.tif" "$src"
 fi
 
-w=$(sips -g pixelWidth "$work/lroc_2k.tif" | awk '/pixelWidth/ {print $2}')
-h=$(sips -g pixelHeight "$work/lroc_2k.tif" | awk '/pixelHeight/ {print $2}')
-if [ "$w" != "2048" ] || [ "$h" != "1024" ]; then
-  echo "source is ${w}x${h}, expected 2048x1024" >&2
+w=$(sips -g pixelWidth "$work/lroc_4k.tif" | awk '/pixelWidth/ {print $2}')
+h=$(sips -g pixelHeight "$work/lroc_4k.tif" | awk '/pixelHeight/ {print $2}')
+if [ "$w" != "4096" ] || [ "$h" != "2048" ]; then
+  echo "source is ${w}x${h}, expected 4096x2048" >&2
   exit 1
 fi
 
-sips -s format jpeg -s formatOptions "$quality" "$work/lroc_2k.tif" --out "$work/moon.jpg" >/dev/null
+sips -s format jpeg -s formatOptions "$quality" "$work/lroc_4k.tif" --out "$work/moon.jpg" >/dev/null
 bytes=$(wc -c < "$work/moon.jpg" | tr -d ' ')
 echo "jpeg q$quality: $bytes bytes"
 
@@ -50,13 +53,13 @@ echo "jpeg q$quality: $bytes bytes"
    so drawing or sampling it can never taint a canvas (globe.js reads pixels).
 
    Source: NASA Scientific Visualization Studio, CGI Moon Kit,
-   lroc_color_poles_2k.tif (LRO LROC WAC mosaic, NASA/GSFC/ASU, public domain),
-   https://svs.gsfc.nasa.gov/4720 - recompressed to JPEG, 2048x1024.
+   lroc_color_poles_4k.tif (LRO LROC WAC mosaic, NASA/GSFC/ASU, public domain),
+   https://svs.gsfc.nasa.gov/4720 - recompressed to JPEG, 4096x2048.
    Longitude 0 (mean-Earth direction) at the image centre, north up. */
 (function (root) {
   root.LUNAR_BASEMAP = {
-    width: 2048,
-    height: 1024,
+    width: 4096,
+    height: 2048,
     projection: "equirectangular",
     source: "NASA SVS CGI Moon Kit (LROC WAC mosaic), svs.gsfc.nasa.gov/4720",
 HEAD

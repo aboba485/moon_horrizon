@@ -214,17 +214,23 @@
      data: URI — same-origin by definition, so sampling it cannot taint the
      canvas, which matters because this file lives on getImageData. When the
      script is absent the globe keeps its schematic shading. */
-  /* This buffer is what the disc is made of: it gets scaled straight up to fill
-     the globe, so its size is the resolution the user sees no matter how good
-     the mosaic behind it is. It used to be a flat 224, which on a retina screen
-     meant a five-fold upscale and a soft, smeared Moon.
+  /* The buffer this gets resampled into is what the user actually sees, so its
+     resolution is the globe's resolution no matter how good the mosaic behind it
+     is. It is sized and laid out in *screen* space: one cell per device pixel of
+     the canvas, covering the canvas rather than the disc.
 
-     Size it to the device pixels the disc actually covers instead, capped where
-     the source runs out: the globe shows one hemisphere, which is half the
-     2048-wide mosaic, so past 1024 there is nothing left to resolve. */
-  var TEX_COARSE = 256;
-  var TEX_MAX = 1024;
-  var tex = { img: null, data: null, tried: false, buf: null, key: null, n: 0 };
+     Covering the disc instead was the earlier mistake. A disc-space buffer is a
+     fixed grid stretched over the whole sphere, so zooming in magnifies its
+     cells and the Moon dissolves into blocks exactly when the user has leaned
+     in to look closely. In screen space the grid never stretches, and the only
+     thing that can run out is the mosaic.
+
+     The cap is a time budget, not a quality one: the inner loop is an inverse
+     projection with trig, and about two megapixels of it is the most that fits
+     in a frame the user will not notice. */
+  var TEX_COARSE_PX = 360;
+  var TEX_MAX_PX = 1400;
+  var tex = { img: null, data: null, tried: false, buf: null, key: null, q: 0 };
   var refineTimer = null;
 
   function texSource() {
@@ -251,12 +257,14 @@
     return tex.data;
   }
 
-  /* Orthographic render of the mosaic for the current camera, into a small
-     cached buffer — same approach and cost as the lighting pass. */
-  /* A full-size rebuild is a million inverse projections with trig in the inner
-     loop — fine once, far too slow for every frame of a drag. So a camera move
-     paints the coarse buffer immediately and asks for the sharp one shortly
-     after; if the drag is still going, that request is simply superseded. */
+  /* Orthographic render of the mosaic for the current camera, into a cached
+     buffer the size of the canvas — same approach as the lighting pass.
+
+     A full-resolution rebuild is a couple of million inverse projections with
+     trig in the inner loop: fine once, far too slow for every frame of a drag.
+     So a camera move paints the coarse buffer immediately and asks for the
+     sharp one shortly after; if the drag is still going, that request is simply
+     superseded. */
   function scheduleRefine() {
     if (refineTimer) return;
     refineTimer = root.setTimeout(function () {
@@ -268,37 +276,51 @@
     }, 120);
   }
 
-  function textureLayer(ctx, f) {
+  function textureLayer(ctx, f, w, h) {
     var src = texSource();
     if (!src) return false;
-    var key = f.lat.toFixed(1) + "|" + f.lon.toFixed(1);
     var dpr = root.devicePixelRatio || 1;
-    var want = Math.max(TEX_COARSE, Math.min(TEX_MAX, Math.ceil(f.R * 2 * dpr / 64) * 64));
+    var edge = Math.max(1, Math.max(w, h));
+    /* `q` is buffer cells per CSS pixel. Full detail is the device pixel ratio;
+       anything beyond that is invisible, and the cap pulls it back under the
+       time budget on a very large canvas. */
+    var qFull = Math.min(dpr, TEX_MAX_PX / edge);
+    var qCoarse = Math.min(qFull, TEX_COARSE_PX / edge);
+    /* Zoom and pan change the sampling, not just the view, so they are part of
+       the identity of the buffer. R carries the zoom. */
+    var key = [w, h, f.cx, f.cy, f.R.toFixed(2), f.lat.toFixed(2), f.lon.toFixed(2)].join("|");
     if (!tex.buf) tex.buf = root.document.createElement("canvas");
-    if (tex.key !== key || tex.n < want) {
+    if (tex.key !== key || tex.q < qFull - 1e-6) {
       /* A camera the buffer has never seen starts coarse; one it is already
          showing is safe to sharpen in place, because that costs a frame the
          user is not currently dragging through. */
-      var n = tex.key === key ? want : TEX_COARSE;
-      tex.buf.width = n;
-      tex.buf.height = n;
+      var q = tex.key === key ? qFull : qCoarse;
+      var bw = Math.max(1, Math.round(w * q));
+      var bh = Math.max(1, Math.round(h * q));
+      tex.buf.width = bw;
+      tex.buf.height = bh;
       var bctx = tex.buf.getContext("2d");
-      var out = bctx.createImageData(n, n);
+      var out = bctx.createImageData(bw, bh);
+      var o8 = out.data;
       var d = src.px.data;
-      var half = n / 2;
+      var sw = src.w;
+      var sh = src.h;
+      var stepX = w / bw;
+      var stepY = h / bh;
       var la = f.lat * DEG;
       var lo = f.lon * DEG;
       var sinLa = Math.sin(la);
       var cosLa = Math.cos(la);
       var sinLo = Math.sin(lo);
       var cosLo = Math.cos(lo);
-      for (var py = 0; py < n; py++) {
-        var ny = (half - py - 0.5) / half;
-        for (var px = 0; px < n; px++) {
-          var nx = (px + 0.5 - half) / half;
-          var rr = nx * nx + ny * ny;
-          var o = (py * n + px) * 4;
-          if (rr > 1) { out.data[o + 3] = 0; continue; }
+      for (var py = 0; py < bh; py++) {
+        var ny = (f.cy - (py + 0.5) * stepY) / f.R;
+        var rowNy = ny * ny;
+        for (var px = 0; px < bw; px++) {
+          var nx = ((px + 0.5) * stepX - f.cx) / f.R;
+          var rr = nx * nx + rowNy;
+          var o = (py * bw + px) * 4;
+          if (rr > 1) { o8[o + 3] = 0; continue; }
           var nz = Math.sqrt(1 - rr);
           // inverse of toView(): view (nx, ny, nz) back to body lat/lon
           var x1 = nz * cosLa - ny * sinLa;
@@ -306,27 +328,50 @@
           var vx = x1 * cosLo - nx * sinLo;
           var vy = x1 * sinLo + nx * cosLo;
           var lonD = Math.atan2(vy, vx) / DEG;
-          var latD = Math.asin(Math.max(-1, Math.min(1, vz))) / DEG;
-          var sx = Math.min(src.w - 1, Math.max(0, Math.round(((lonD + 180) / 360) * src.w)));
-          var sy = Math.min(src.h - 1, Math.max(0, Math.round(((90 - latD) / 180) * src.h)));
-          var so = (sy * src.w + sx) * 4;
-          out.data[o] = d[so];
-          out.data[o + 1] = d[so + 1];
-          out.data[o + 2] = d[so + 2];
-          out.data[o + 3] = 255;
+          var latD = Math.asin(vz > 1 ? 1 : (vz < -1 ? -1 : vz)) / DEG;
+          /* Bilinear, because zoomed in the screen asks for more pixels than
+             the mosaic has and nearest-neighbour answers that with hard square
+             blocks — the thing that reads as "broken" rather than "distant". */
+          var fx = ((lonD + 180) / 360) * sw - 0.5;
+          var fy = ((90 - latD) / 180) * sh - 0.5;
+          var ix = Math.floor(fx);
+          var iy = Math.floor(fy);
+          var tx = fx - ix;
+          var ty = fy - iy;
+          // longitude is cyclic; latitude stops at the poles
+          var xa, xb;
+          // Only the ±180° seam needs the wrap, and it is a handful of pixels.
+          if (ix >= 0 && ix + 1 < sw) { xa = ix; xb = ix + 1; }
+          else { xa = ((ix % sw) + sw) % sw; xb = ((ix + 1) % sw + sw) % sw; }
+          var ya = iy < 0 ? 0 : (iy > sh - 1 ? sh - 1 : iy);
+          var yb = iy + 1 > sh - 1 ? sh - 1 : (iy + 1 < 0 ? 0 : iy + 1);
+          var ra = ya * sw;
+          var rb = yb * sw;
+          var p00 = (ra + xa) * 4;
+          var p10 = (ra + xb) * 4;
+          var p01 = (rb + xa) * 4;
+          var p11 = (rb + xb) * 4;
+          var w00 = (1 - tx) * (1 - ty);
+          var w10 = tx * (1 - ty);
+          var w01 = (1 - tx) * ty;
+          var w11 = tx * ty;
+          o8[o] = d[p00] * w00 + d[p10] * w10 + d[p01] * w01 + d[p11] * w11;
+          o8[o + 1] = d[p00 + 1] * w00 + d[p10 + 1] * w10 + d[p01 + 1] * w01 + d[p11 + 1] * w11;
+          o8[o + 2] = d[p00 + 2] * w00 + d[p10 + 2] * w10 + d[p01 + 2] * w01 + d[p11 + 2] * w11;
+          o8[o + 3] = 255;
         }
       }
       bctx.putImageData(out, 0, 0);
       tex.key = key;
-      tex.n = n;
-      if (n < want) scheduleRefine();
+      tex.q = q;
+      if (q < qFull - 1e-6) scheduleRefine();
     }
     ctx.save();
     ctx.beginPath();
     ctx.arc(f.cx, f.cy, f.R, 0, 2 * Math.PI);
     ctx.clip();
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(tex.buf, f.cx - f.R, f.cy - f.R, f.R * 2, f.R * 2);
+    ctx.drawImage(tex.buf, 0, 0, w, h);
     ctx.restore();
     return true;
   }
@@ -545,7 +590,7 @@
     ctx.arc(f.cx, f.cy, f.R * 1.3, 0, 2 * Math.PI);
     ctx.fill();
 
-    if (!textureLayer(ctx, f)) {
+    if (!textureLayer(ctx, f, s.w, s.h)) {
       albedo(ctx, f);
       surface(ctx, f);
     }
