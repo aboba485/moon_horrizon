@@ -31,13 +31,13 @@ The Moon is a 1737.4 km sphere. Geometric EQJ vectors from Astronomy Engine are 
 
 `evaluate` returns `t`, `sky`, `view`, `sunAlt`, `sunAz`, `earthAlt`, `earthAz`, `sunRadius`, `earthRadius`, `sunFrac`, `lit`, `earthCenter`, `earthDisk`, `earthUp`, `stationAlt`, `stationUp`, `dte`, `joint`, `irradiance`, `cosI`, `power`, `subSolarLat`, `subEarthLat`, `subEarthLon`, and `stations [{id,name,alt,az}]`.
 
-`sunRadius` and `earthRadius` are angular radii, not diameters. `stationAlt` is the maximum of station altitudes. `sunFrac` is a linear approximation to the visible solar-disk fraction (0–1). `lit` means any solar disk is above the mask. `earthCenter` means the center is above the mask; `earthDisk` and `earthUp` mean any Earth limb clears it. `stationUp` and `dte` mean at least one station has altitude strictly above the mask. `joint` means `lit && dte`. At equality the corresponding visibility is false.
+`sunRadius` and `earthRadius` are angular radii, not diameters. `stationAlt` is the altitude of the station with the greatest clearance above the skyline on its own bearing; `maskLink` is that skyline angle. `horizonSunFrac` is a linear approximation to the solar-disk fraction above the skyline (0–1). `sunFrac = horizonSunFrac · (1 − eclipseObscuration)` also accounts for geometric occultation by Earth. `lit` means `sunFrac > 0`. Horizon and eclipse fractions are multiplied, an approximation when both masks cut the disk simultaneously. `earthCenter` means the center is above the mask; `earthDisk` and `earthUp` mean any Earth limb clears it. `stationUp` and `dte` mean at least one station has altitude strictly above the mask. `joint` means `lit && dte`. At equality the corresponding visibility is false.
 
 ### Summary fields
 
 `spanMs`, `sunlitHours`, `sunlitFrac`, `earthHours`, `earthFrac`, `dteHours`, `dteFrac`, `jointHours`, `jointFrac`, `longestNight`, `longestDay`, `longestBlackout`, `longestLink`, `sunMin`, `sunMax`, `earthMin`, `earthMax`, `energyWh`, `meanPower`.
 
-Each longest run is `{ms, start}` with epoch-ms start, or `{ms:0, start:null}` if no nonzero interval qualifies. Earth hours/fraction use disk visibility. Energy uses trapezoidal integration of power and is Wh/m²; mean power is W/m² over the whole span, including night. Boolean fractions use half an interval at a transition. Longest runs use left-endpoint state. These statistics are sample-resolution estimates, not exact event integrations.
+Power, illumination, and joint availability include eclipses. Each longest run is `{ms, start}` with epoch-ms start, or `{ms:0, start:null}` if no nonzero interval qualifies. Earth hours/fraction use disk visibility. Energy uses trapezoidal integration of power and is Wh/m²; mean power is W/m² over the whole span, including night. Boolean fractions use half an interval at a transition. Longest runs use left-endpoint state. These statistics are sample-resolution estimates, not exact event integrations.
 
 ### Sample events
 
@@ -54,8 +54,9 @@ Panel: `{tiltDeg, tracking, azimuthDeg, efficiency}`. Default is `{tiltDeg:90, t
 ```
 irradiance = 1361 · (KM_PER_AU / moonSunDistanceKm)²
 cosI = clamp(sin(alt)cos(tilt) + cos(alt)sin(tilt)cos(panelAz − sunAz), 0, 1)
-sunFrac = clamp((sunAlt − mask + sunRadius) / (2·sunRadius), 0, 1)
-power = irradiance · cosI · efficiency · sunFrac
+horizonSunFrac = clamp((sunAlt − maskAt(sunAz) + sunRadius) / (2·sunRadius), 0, 1)
+sunFrac = horizonSunFrac · (1 − eclipseObscuration)
+power = irradiance · cosI · efficiency · horizonSunFrac · max(1e-6, 1 − eclipseObscuration)
 ```
 
 Trigonometric arguments are radians internally. Irradiance and electrical power are W/m² of cells. No dust, temperature derating, mutual/structural shadow, or atmospheric effects. The disk fraction is a linear approximation, not circular-segment integration. A tracking vertical array collects approximately `cos(alt)` versus `sin(alt)` for a flat array at positive low elevation.
@@ -70,7 +71,7 @@ Trigonometric arguments are radians internally. Irradiance and electrical power 
 
 These are complex-level points, not individual dishes. Station geometry rotates an Earth surface point through sidereal time and the equator-of-date to EQJ rotation into the lunar frame. DTE is geometric line of sight under the lunar mask, not a station schedule, link budget, or antenna-availability guarantee.
 
-There is no LOLA DEM, terrain skyline, or actual peak/crater shadow model. The shared uniform angular mask is a user scenario. A spherical crater-floor prediction can disagree with actual terrain by many degrees. Results are for comparison, not flight certification.
+The sky geometry still uses a spherical Moon. `terrain.js` supplies offline LOLA skyline profiles for 17 catalogue sites south of 79°S: 120 m DEM pixels, 360 azimuth bins, rays to 100 km. Pass `{profile, offsetDeg}` as `maskDeg` to evaluate against that skyline; a number retains the uniform-mask model. Each station uses its own bearing. Profiles do not supply local slope self-shadowing, scattered light, thermal behaviour, or a landing hazard map. Custom coordinates and sites outside the catalogue profiles retain the uniform-mask fallback. Results are for comparison, not flight certification.
 
 ## Sites
 
@@ -123,3 +124,41 @@ ok  Far side Earth         model az 15.550 el -85.448   horizons az 15.544 el -8
 subsolar latitude peak over 2026 sample: 1.587 deg
 worst angular error: 0.007 deg
 ```
+
+## Round 2 operational APIs
+
+All functions are synchronous, offline browser/Node functions. Existing exports and rotation math are preserved. New fields are additive except that `sunFrac`, `lit`, `joint`, and `power` now include Earth occultation; use `horizonSunFrac` for the previous horizon-only fraction.
+
+### Refined rise/set events
+
+`horizonEvents(start, durationMs, lat, lon, {maskDeg, body})` returns chronological `{kind:"rise"|"set", t, azDeg, altDeg, refined:true}` objects. Body defaults to `"sun"`; `"earth"` is also supported. Clearance is upper limb elevation minus the skyline at that body's current bearing. Rise is the first limb appearing, set the last limb disappearing. These are horizon events, not eclipse contacts. The function coarse-scans at `stepMsFor(durationMs)`, then bisects each sign-change bracket to 500 ms or less and reports the actual azimuth/elevation at the rounded epoch. Events strictly after the start and through the end are returned; no crossing gives `[]`. Short excursions entirely between same-sign coarse samples can be missed, especially across narrow terrain peaks. Sub-second refinement is timing precision conditional on the geometric/terrain model, not a sub-second physical accuracy claim.
+
+`nextEvent(fromMs, lat, lon, {maskDeg, body})` returns `{kind,t,azDeg,msUntil}` for the first such crossing, searching 400 days, or null. Null means no crossing found within that finite search, not a proof of perpetual visibility for arbitrary terrain. It is appropriate for far-side Earth that never rises. Callers should cache results while counting down rather than rerunning a seasonal search on every animation frame.
+
+The older `eventsFromSamples` remains available, uses per-sample `maskSun`, `maskEarth`, `maskLink`, and is an inexpensive interpolation for UI scrubbing. `nextCrossing` remains the legacy center-altitude API; the new limb-aware APIs are preferred.
+
+### Inverse solve
+
+`solveFor(start, durationMs, lat, lon, {body,azDeg,altDeg,toleranceDeg,maskDeg})` returns chronological `{t,azDeg,altDeg,exact,separationDeg,aboveHorizon}` results. Either target axis may be null; both null returns `[]`. Default tolerance is 0.01°. Azimuth wraps through north correctly. Elevation must be within −90..90°. A single axis is solved for all bracketed roots (plus tangent minima), with sub-second refinement. If unattainable, its closest sampled/refined approach is returned with `exact:false`. For two constrained axes, local minima of spherical angular separation are refined and reported, including one-sided boundary minima. `exact` requires every specified coordinate to be within tolerance. With one axis, `separationDeg` is absolute coordinate error; with both, it is spherical angular separation. Mask controls only the `aboveHorizon` annotation: a requested direction below the skyline is still a valid geometric inverse solution. Azimuth at the zenith is ill-conditioned. As with events, the scan can miss structure narrower than its cadence.
+
+### Site-specific eclipses
+
+`eclipseAt(date,lat,lon)` returns `{sepDeg,earthRadiusDeg,sunRadiusDeg,obscuration,kind}`. Separation is calculated from the topocentric Sun/Earth directions using atan2(cross-product magnitude, dot product), stable at conjunction. Obscuration is circle–circle overlap area divided by solar disk area, clamped to 0..1, using the actual varying angular radii. No overlap is `none`, any partial disk overlap is `partial`, full coverage is `total`. `penumbral` is reserved in the shared contract: an Earth-observed penumbral lunar eclipse does not map to a unique site-wide class. The local function reports solid-disk overlap only, not atmospheric dimming. It does not filter events by local horizon; an occultation can happen below the ground, where panel power is already zero.
+
+`findEclipses(start,durationMs,lat,lon)` uses Astronomy Engine's `SearchLunarEclipse` / `NextLunarEclipse` only to locate candidate lunations. It then finds site-specific closest approach and bisects solid-disk contact times to <=500 ms. Returns `{startMs,peakMs,endMs,maxObscuration,kind}` for every local occultation overlapping the window; contact times are the full physical event and can extend outside the requested window. Peak is the minimum external-disk clearance, avoiding an arbitrary point on a flat totality plateau. Global total/partial/penumbral classification is never substituted for local obscuration: the same global partial lunar eclipse can be total at one site and partial or absent at another.
+
+`evaluate` also returns `eclipse`, `eclipseObscuration`, `eclipseKind`, `horizonSunFrac`, `powerWithoutEclipse`. `irradiance` remains the unobstructed distance-scaled solar irradiance, even at totality. `sunFrac` is zero at geometric totality. Panel power retains the exported **`ECLIPSE_POWER_FLOOR = 1e-6`** of uneclipsed horizon-limited power: a numerical residual only, not a claimed estimate or lower bound for sunlight transmitted by Earth's atmosphere. Do not design an energy reserve from this floor. Real totality illumination is nonzero, red and variable, because Earth's atmosphere refracts/scatters light; no radiative-transfer model is supplied. Earth's geometric radius is **6378.137 km** with no atmospheric enlargement. The real effective umbra is often described as roughly 2% larger; this model intentionally does not silently apply that empirical correction. Solid-Earth contacts and energy loss are model estimates.
+
+`sampleMission` retains the requested regular cadence and additionally includes eclipse contacts, peak, and 5-minute samples inside each overlapping eclipse. This prevents long-mission 6-hour steps from omitting an eclipse entirely. Energy uses those nonuniform samples. `scanWindows` remains a coarse 6-hour screen and can miss an eclipse or brief outage; it must not be used for battery sizing. Eclipse energy lost can be integrated as `powerWithoutEclipse − power`.
+
+### Round 2 checks
+
+`node test/round2.test.mjs` (2026-11-15):
+
+```text
+ok horizon events: real LOLA bearings, sub-second brackets, polar day/night, far-side Earth, countdown
+ok inverse: both elevation roots, azimuth wrap, two-axis solve, unattainable target, Earth
+ok eclipses: four site fixtures, circle-overlap area, vendor global sequence, contacts, energy loss on coarse missions
+```
+
+Both original gate tests are rerun unchanged; their 2026-11-14 angular fixtures and Mons Mouton November energy remain unchanged. March 3 at 11:33:40 UTC, Mons Mouton now reports separation 0.617635°, Earth radius 0.955481°, Sun radius 0.268095°, obscuration 1 and residual power ~0.000412 W/m², versus the former ~412.4 W/m². At August 28 04:12:49 UTC the same site has separation 0.219900° and total local coverage even though the Earth-centric lunar eclipse is partial (vendor obscuration ~0.966). Four topocentric fixtures and an independent numerical area integration test the overlap model.

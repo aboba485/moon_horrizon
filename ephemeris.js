@@ -14,6 +14,8 @@
   const SUN_RADIUS_KM = 695700;
   const EARTH_RADIUS_KM = 6378.137;
   const SOLAR_CONSTANT = 1361;
+  // Numerical residual for totality, NOT an atmospheric transmission estimate.
+  const ECLIPSE_POWER_FLOOR = 1e-6;
 
   const DSN = [
     { id: "goldstone", name: "Goldstone", lat: 35.2471, lon: -116.7933 },
@@ -272,8 +274,10 @@
     const radius = view.sunRadiusDeg || 0.27;
     const maskSun = maskAt(view.sun.az);
     const maskEarth = maskAt(view.earth.az);
-    const sunFrac = clamp01((view.sun.alt - maskSun + radius) / (2 * radius));
-    const cosI = sunFrac > 0 ? incidence(view.sun.alt, view.sun.az, p) : 0;
+    const horizonSunFrac = clamp01((view.sun.alt - maskSun + radius) / (2 * radius));
+    const eclipse = eclipseFromView(view);
+    const sunFrac = horizonSunFrac * (1 - eclipse.obscuration);
+    const cosI = horizonSunFrac > 0 ? incidence(view.sun.alt, view.sun.az, p) : 0;
     const eff = p.efficiency == null ? 0.3 : p.efficiency;
     // A station counts when it clears the skyline on its own bearing, so the
     // one to report is the one with the most clearance, not the highest one.
@@ -300,6 +304,10 @@
       sunRadius: view.sunRadiusDeg,
       earthRadius: view.earthRadiusDeg,
       sunFrac,
+      horizonSunFrac,
+      eclipseObscuration: eclipse.obscuration,
+      eclipseKind: eclipse.kind,
+      eclipse,
       lit: sunFrac > 0,
       earthCenter: view.earth.alt > maskEarth,
       earthDisk: view.earth.alt + view.earthRadiusDeg > maskEarth,
@@ -313,7 +321,9 @@
       maskLink,
       irradiance: sky.irradiance,
       cosI,
-      power: sky.irradiance * cosI * eff * sunFrac,
+      powerWithoutEclipse: sky.irradiance * cosI * eff * horizonSunFrac,
+      power: sky.irradiance * cosI * eff * horizonSunFrac *
+        Math.max(ECLIPSE_POWER_FLOOR, 1 - eclipse.obscuration),
       subSolarLat: sky.subSolar.lat,
       subSolarLon: sky.subSolar.lon,
       subEarthLat: sky.subEarth.lat,
@@ -340,14 +350,27 @@
         !Number.isFinite(step) || step <= 0) {
       throw new RangeError("Mission requires a valid start, nonnegative finite duration, and positive finite step");
     }
-    const samples = [];
+    const times = [];
     for (let t = t0; ; t += step) {
-      const stamp = new Date(Math.min(t, t0 + durationMs));
+      times.push(new Date(Math.min(t, t0 + durationMs)).getTime());
+      if (t >= t0 + durationMs) break;
+    }
+    // A six-hour/year grid must not silently step over a four-hour eclipse.
+    for (const event of findEclipses(t0, durationMs, lat, lon)) {
+      for (const t of [event.startMs, event.peakMs, event.endMs]) {
+        if (t >= t0 && t <= t0 + durationMs) times.push(t);
+      }
+      for (let t = Math.max(t0, event.startMs); t < Math.min(t0 + durationMs, event.endMs); t += 300000) {
+        times.push(Math.round(t));
+      }
+    }
+    const samples = [];
+    for (const t of [...new Set(times)].sort((a, b) => a - b)) {
+      const stamp = new Date(t);
       const point = evaluate(stamp, lat, lon, mask, panel);
       delete point.sky;
       delete point.view;
       samples.push(point);
-      if (t >= t0 + durationMs) break;
     }
     return samples;
   }
@@ -485,6 +508,221 @@
     };
   }
 
+  function epoch(value) {
+    const t = value instanceof Date ? value.getTime() : new Date(value).getTime();
+    if (!Number.isFinite(t)) throw new RangeError("Invalid UTC time");
+    return t;
+  }
+
+  function windowBounds(start, durationMs) {
+    const a = epoch(start);
+    if (!Number.isFinite(durationMs) || durationMs < 0 || !Number.isFinite(a + durationMs)) {
+      throw new RangeError("Duration must be finite and nonnegative");
+    }
+    return [a, a + durationMs];
+  }
+
+  function bodyName(body) {
+    const name = body == null ? "sun" : body;
+    if (name !== "sun" && name !== "earth") throw new RangeError("Body must be sun or earth");
+    return name;
+  }
+
+  function bodyLook(t, lat, lon, body) {
+    const view = atSite(new Date(t), lat, lon);
+    const look = view[body];
+    return { azDeg: look.az, altDeg: look.alt,
+      radiusDeg: body === "earth" ? view.earthRadiusDeg : view.sunRadiusDeg };
+  }
+
+  function bisectTime(a, b, fn) {
+    let fa = fn(a);
+    if (fa === 0) return a;
+    if (fn(b) === 0) return b;
+    while (b - a > 500) {
+      const m = (a + b) / 2;
+      const fm = fn(m);
+      if ((fm > 0) === (fa > 0)) { a = m; fa = fm; }
+      else b = m;
+    }
+    return (a + b) / 2;
+  }
+
+  // Bounded one-dimensional minimum, with a sub-second termination condition.
+  function minimumTime(a, b, fn) {
+    const q = (Math.sqrt(5) - 1) / 2;
+    let c = b - q * (b - a), d = a + q * (b - a);
+    let fc = fn(c), fd = fn(d);
+    while (b - a > 250) {
+      if (fc < fd) { b = d; d = c; fd = fc; c = b - q * (b - a); fc = fn(c); }
+      else { a = c; c = d; fc = fd; d = a + q * (b - a); fd = fn(d); }
+    }
+    return (a + b) / 2;
+  }
+
+  function scanHorizon(start, durationMs, lat, lon, opts, firstOnly) {
+    const options = opts || {};
+    const [a, b] = windowBounds(start, durationMs);
+    const body = bodyName(options.body);
+    const maskAt = maskResolver(options.maskDeg);
+    const clearance = (t) => { const p = bodyLook(t, lat, lon, body);
+      return p.altDeg + p.radiusDeg - maskAt(p.azDeg); };
+    const events = [];
+    const step = stepMsFor(durationMs);
+    let prevT = a, prev = clearance(a);
+    for (let t = Math.min(a + step, b); t > prevT; t = Math.min(t + step, b)) {
+      const cur = clearance(t);
+      if ((prev > 0) !== (cur > 0)) {
+        const when = Math.round(bisectTime(prevT, t, clearance));
+        if (when > a) {
+          const p = bodyLook(when, lat, lon, body);
+          events.push({ kind: cur > 0 ? "rise" : "set", t: when,
+            azDeg: p.azDeg, altDeg: p.altDeg, refined: true });
+          if (firstOnly) return events;
+        }
+      }
+      prevT = t; prev = cur;
+    }
+    return events;
+  }
+
+  function horizonEvents(start, durationMs, lat, lon, opts) {
+    return scanHorizon(start, durationMs, lat, lon, opts, false);
+  }
+
+  function nextEvent(fromMs, lat, lon, opts) {
+    const t0 = epoch(fromMs);
+    // Search a full seasonal cycle; null means no crossing within this horizon.
+    const event = scanHorizon(t0, 400 * 86400000, lat, lon, opts, true)[0];
+    return event ? { kind: event.kind, t: event.t, azDeg: event.azDeg, msUntil: event.t - t0 } : null;
+  }
+
+  function wrappedAngle(angle) { return ((angle + 180) % 360 + 360) % 360 - 180; }
+
+  function angularSeparation(az1, alt1, az2, alt2) {
+    const a = siteUnit(alt1, az1), b = siteUnit(alt2, az2);
+    const cross = { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z,
+      z: a.x * b.y - a.y * b.x };
+    return Math.atan2(mag(cross), dot(a, b)) * RAD;
+  }
+
+  function solveFor(start, durationMs, lat, lon, opts) {
+    const options = opts || {};
+    const [a, b] = windowBounds(start, durationMs);
+    const body = bodyName(options.body);
+    const hasAz = options.azDeg != null, hasAlt = options.altDeg != null;
+    if (!hasAz && !hasAlt) return [];
+    if ((hasAz && !Number.isFinite(options.azDeg)) ||
+        (hasAlt && (!Number.isFinite(options.altDeg) || Math.abs(options.altDeg) > 90))) {
+      throw new RangeError("Target angles must be finite; elevation must be within -90..90");
+    }
+    const tolerance = options.toleranceDeg == null ? 0.01 : options.toleranceDeg;
+    if (!Number.isFinite(tolerance) || tolerance < 0) throw new RangeError("Invalid angular tolerance");
+    const maskAt = maskResolver(options.maskDeg);
+    const residual = (p) => hasAz && hasAlt
+      ? angularSeparation(p.azDeg, p.altDeg, options.azDeg, options.altDeg)
+      : Math.abs(hasAz ? wrappedAngle(p.azDeg - options.azDeg) : p.altDeg - options.altDeg);
+    const errorAt = (t) => residual(bodyLook(t, lat, lon, body));
+    const signed = (p) => hasAz ? wrappedAngle(p.azDeg - options.azDeg) : p.altDeg - options.altDeg;
+    const grid = [];
+    for (let t = a; ; t = Math.min(t + stepMsFor(durationMs), b)) {
+      const p = bodyLook(t, lat, lon, body);
+      grid.push({ t, p, error: residual(p), signed: signed(p) });
+      if (t >= b) break;
+    }
+    const candidates = [];
+    const add = (t) => {
+      t = Math.round(Math.max(a, Math.min(b, t)));
+      if (candidates.some((p) => Math.abs(p.t - t) < 1000)) return;
+      const p = bodyLook(t, lat, lon, body);
+      const separationDeg = residual(p);
+      const exact = (!hasAz || Math.abs(wrappedAngle(p.azDeg - options.azDeg)) <= tolerance) &&
+        (!hasAlt || Math.abs(p.altDeg - options.altDeg) <= tolerance);
+      candidates.push({ t, azDeg: p.azDeg, altDeg: p.altDeg, exact, separationDeg,
+        aboveHorizon: p.altDeg + p.radiusDeg > maskAt(p.azDeg) });
+    };
+    if (!(hasAz && hasAlt)) {
+      for (let i = 0; i < grid.length - 1; i++) {
+        const p = grid[i], q = grid[i + 1];
+        if (p.signed === 0) add(p.t);
+        if (q.signed === 0) add(q.t);
+        // Reject the discontinuity opposite the requested azimuth (359 -> 0 is valid).
+        if (p.signed * q.signed < 0 && (!hasAz || Math.abs(p.signed - q.signed) < 180)) {
+          add(bisectTime(p.t, q.t, (t) => signed(bodyLook(t, lat, lon, body))));
+        }
+      }
+    }
+    // Also catch tangent contacts and closest approaches with both axes constrained.
+    for (let i = 1; i < grid.length - 1; i++) {
+      if (grid[i].error <= grid[i - 1].error && grid[i].error < grid[i + 1].error) {
+        const t = minimumTime(grid[i - 1].t, grid[i + 1].t, errorAt);
+        // Root brackets already gave the same crossing, possibly on a flat slope.
+        if (hasAz && hasAlt || !candidates.some((p) => p.t >= grid[i - 1].t && p.t <= grid[i + 1].t)) add(t);
+      }
+    }
+    if (grid[0].error <= tolerance || grid.length === 1) add(a);
+    if (grid.at(-1).error <= tolerance) add(b);
+    if (hasAz && hasAlt || !candidates.some((p) => p.exact)) {
+      if (grid.length > 1 && grid[0].error < grid[1].error) add(a);
+      if (grid.length > 1 && grid.at(-1).error < grid.at(-2).error) add(b);
+    }
+    const exact = candidates.filter((p) => p.exact);
+    // For one axis report all roots, or the single closest approach if unattainable.
+    return (hasAz && hasAlt ? candidates : exact.length ? exact :
+      candidates.sort((p, q) => p.separationDeg - q.separationDeg).slice(0, 1)).sort((p, q) => p.t - q.t);
+  }
+
+  // Exact planar circle overlap in angular coordinates (small disks in degrees).
+  function diskObscuration(sep, earthRadius, sunRadius) {
+    if (sep >= earthRadius + sunRadius) return 0;
+    if (sep <= Math.abs(earthRadius - sunRadius)) {
+      return earthRadius >= sunRadius ? 1 : (earthRadius / sunRadius) ** 2;
+    }
+    const d2 = sep * sep, r2 = sunRadius * sunRadius, R2 = earthRadius * earthRadius;
+    const x = Math.acos(Math.max(-1, Math.min(1, (d2 + r2 - R2) / (2 * sep * sunRadius))));
+    const y = Math.acos(Math.max(-1, Math.min(1, (d2 + R2 - r2) / (2 * sep * earthRadius))));
+    const triangle = Math.sqrt(Math.max(0, (-sep + sunRadius + earthRadius) *
+      (sep + sunRadius - earthRadius) * (sep - sunRadius + earthRadius) * (sep + sunRadius + earthRadius)));
+    return clamp01((r2 * x + R2 * y - 0.5 * triangle) / (Math.PI * r2));
+  }
+
+  function eclipseFromView(view) {
+    const sepDeg = angularSeparation(view.sun.az, view.sun.alt, view.earth.az, view.earth.alt);
+    const earthRadiusDeg = view.earthRadiusDeg, sunRadiusDeg = view.sunRadiusDeg;
+    const obscuration = diskObscuration(sepDeg, earthRadiusDeg, sunRadiusDeg);
+    return { sepDeg, earthRadiusDeg, sunRadiusDeg, obscuration,
+      kind: obscuration === 0 ? "none" : obscuration >= 1 ? "total" : "partial" };
+  }
+
+  function eclipseAt(date, lat, lon) {
+    return eclipseFromView(atSite(date, lat, lon));
+  }
+
+  function findEclipses(start, durationMs, lat, lon) {
+    const [a, b] = windowBounds(start, durationMs);
+    if (a === b) return [];
+    const events = [];
+    // Vendor gives candidate full Moons, not site-level obscuration or contacts.
+    let candidate = Astronomy.SearchLunarEclipse(new Date(a - 2 * 86400000));
+    while (candidate.peak.date.getTime() <= b + 86400000) {
+      const centre = candidate.peak.date.getTime();
+      const lo = centre - 12 * 3600000, hi = centre + 12 * 3600000;
+      const clearance = (t) => { const e = eclipseAt(new Date(t), lat, lon);
+        return e.sepDeg - e.earthRadiusDeg - e.sunRadiusDeg; };
+      const peakMs = Math.round(minimumTime(lo, hi, clearance));
+      if (clearance(peakMs) < 0) {
+        const startMs = Math.round(bisectTime(lo, peakMs, clearance));
+        const endMs = Math.round(bisectTime(peakMs, hi, clearance));
+        if (endMs > a && startMs < b) {
+          const peak = eclipseAt(new Date(peakMs), lat, lon);
+          events.push({ startMs, peakMs, endMs, maxObscuration: peak.obscuration, kind: peak.kind });
+        }
+      }
+      candidate = Astronomy.NextLunarEclipse(candidate.peak);
+    }
+    return events;
+  }
+
   function nextCrossing(start, lat, lon, maskDeg, which, wantRise) {
     const t0 = start instanceof Date ? start.getTime() : new Date(start).getTime();
     const step = 30 * 60 * 1000;
@@ -588,6 +826,8 @@
 
   const api = {
     DSN,
+    ECLIPSE_POWER_FLOOR,
+    horizonEvents, nextEvent, solveFor, eclipseAt, findEclipses,
     MOON_RADIUS_KM,
     observe,
     siteView,
