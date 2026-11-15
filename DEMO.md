@@ -1,6 +1,6 @@
 # Demo script
 
-A timed walkthrough of Lunar Horizon. Three versions: 30 seconds, 2 minutes, 5 minutes. All of them use the three buttons at the top of the stage, so nothing has to be typed on stage and nothing can be mistyped.
+A timed walkthrough of Lunar Horizon. Three versions: 30 seconds, 2 minutes, 5 minutes. All of them use the four buttons at the top of the stage, so nothing has to be typed on stage and nothing can be mistyped.
 
 Open `index.html`. It starts in **Simple** mode on the globe. Have the window wide enough that the globe and the card sit side by side.
 
@@ -21,9 +21,9 @@ Use this for the video or a hallway pitch. One click, one sentence each.
 
 ---
 
-## 2 minutes
+## 2½ minutes
 
-The core demo. Three clicks, in this order, because each one answers a different question.
+The core demo. Four clicks, in this order, because each one answers a different question. Drop the eclipse click if you are held to two minutes.
 
 **0:00 — the problem (15 s).**
 Globe on screen, no story selected. Drag it once so it is obviously live.
@@ -53,7 +53,13 @@ The globe flies to the pole, Shackleton is selected, and the reading appears.
 >
 > And the interesting case next to it — Slater Plain is past the mean-Earth hemisphere, so you would assume the same answer. Libration of plus or minus eight degrees lifts Earth over its horizon for about a third of the month."
 
-**1:50 — close (10 s).**
+**1:50 — click *The one outage you can predict* (25 s).**
+
+> "One more, because it is the only thing in a mission plan you can put a date on. The 28th of August 2026. From Earth that is a lunar eclipse. From the ground at Mons Mouton it is a *solar* eclipse — Earth passes in front of the Sun, covers 100% of it, and the whole event runs four point seven hours.
+>
+> And it validates the engine for free. An eclipse is the Sun and Earth at the same place in the sky, and this tool computes those two directions by completely separate paths. They agree to 0.604 degrees, inside Earth's 0.94-degree disk. No sign error in the lunar rotation survives that."
+
+**2:15 — close (10 s).**
 
 > "Everything you just saw is checked against JPL Horizons to 0.007 degrees, and the comparison table is in the app, not just in the README."
 
@@ -63,7 +69,7 @@ Scroll to **Where the data comes from, and how it was checked** and open it. Lea
 
 ## 5 minutes
 
-Run the 2-minute script, then add these in order.
+Run the core script, then add these in order.
 
 **+0:30 — the evidence panel, read out.**
 Already open from the close. Walk the four sources and say what each is load-bearing for: LOLA is every horizon profile, Horizons is the reference, IAU WGCCRE turns a sky vector into a direction on the ground, and the catalogue is published coordinates. Then the table: eight cases, the pole, Mouton, Apollo 11, Slater, the far side, worst delta 0.007° against a 0.15° tolerance.
@@ -71,7 +77,7 @@ Already open from the close. Walk the four sources and say what each is load-bea
 > "`node test/validate.mjs` re-runs this live against the Horizons API. If the engine ever drifts, this file stops matching."
 
 **+1:00 — switch to Expert.**
-Click **Expert** in the header. Same scenario, nothing recomputed.
+Click **A whole lunar day of sunlight** again first, so the state is known: Mons Mouton, 2026-11-14, one lunar day, LOLA on, mask 0. Every number quoted from here down is for that scenario. Then click **Expert** in the header.
 
 > "Nothing is removed in the simple view, only hidden. This is the same state."
 
@@ -87,6 +93,16 @@ In the array controls, switch **Arrangement** from *Vertical, tracking the Sun i
 
 Switch it back.
 
+**+0:40 — the two questions a planner actually asks.**
+
+First, the inverse. In the left column under **Find a Sun position**, type `3` into *Elevation*, leave *Azimuth* empty, and click **Find times in this mission**.
+
+> "Not 'where is the Sun now' but 'when is it where I need it'. At Mouton over this lunar day the Sun is at three degrees twice — once on a bearing of 72 degrees, once on 289. Click either one and the playhead goes there."
+
+Second, the delay. Set **If we slip** to *14 days later*.
+
+> "A launch slip is the most common change to a plan, so it is a control, not a recomputation. Same site, same array, same mask, epoch moved two weeks. Here direct-to-Earth goes from 49 to 58 per cent. Near the pole two weeks can invert the answer, because it moves the Sun to the other side of the same rim."
+
 **+0:30 — scan and export.**
 Click **Scan the next year**, let it rank start dates, open one.
 
@@ -95,7 +111,9 @@ Click **Scan the next year**, let it rank start dates, open one.
 **+0:30 — limits, said out loud.**
 Do not skip this. It is the difference between a tool and a demo.
 
-> "Azimuth is binned at one degree, so a knife-edge ridge is smoothed. Rays stop at 100 kilometres. Sites north of 79 south have no profile at all and fall back to a uniform mask. There is no self-shadowing, no scattered light, no thermal model, no link budget. A half-degree margin is a question for a real terrain study, not an answer."
+> "Azimuth is binned at one degree, so a knife-edge ridge is smoothed. Rays stop at 100 kilometres. Sites north of 79 south have no profile at all and fall back to a uniform mask. There is no self-shadowing, no scattered light, no thermal model, no link budget. A half-degree margin is a question for a real terrain study, not an answer.
+>
+> And one we found in our own engine: the lit fraction models the horizon blocking the Sun, not Earth blocking the Sun. So across an eclipse the energy total is optimistic — about 1.5 kilowatt-hours per square metre at Mouton on the 28th of August. The geometry is right, the integral is not corrected yet, and the app says so itself rather than letting you find out."
 
 ---
 
@@ -106,7 +124,8 @@ Say the Shackleton number. 100% on a map, 48% against the real rim. Everything e
 ## Things that go wrong on stage
 
 - **Open it by double-clicking `index.html`.** There is no server and no build. If someone asks, that is deliberate — `fetch()` of a local file is blocked over `file://`, which is why the data ships as scripts.
-- **The three buttons are also links.** `index.html#st=rim`, `#st=margin`, `#st=silence`. If a click misses, use the URL.
+- **The four buttons are also links.** `index.html#st=rim`, `#st=margin`, `#st=silence`, `#st=eclipse`. If a click misses, use the URL.
+- **Next eclipse is usually disabled, and that is correct.** Eclipses come about twice a year, so most missions contain none. The tooltip says why. It lights up on the eclipse finding.
 - **Clicking any site by hand clears the active finding.** That is intended; the reading would otherwise describe a site that is no longer selected.
 - **Play is safe to leave running.** Clicking a finding stops it and returns the playhead to the landing epoch, so the reading is never for a moved playhead.
 - **Expert mode needs width.** Below about 860 px the console stacks into one column and the aside drops under the stage. It is only CSS, so widening the window fixes it immediately.

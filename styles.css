@@ -120,6 +120,8 @@ h1 {
 .app.mode-simple .hero,
 .app.mode-simple .metrics,
 .app.mode-simple #compare,
+.app.mode-simple #slip-table,
+.app.mode-simple .slip-control,
 .app.mode-simple .chart-wrap,
 .app.mode-simple .split { display: none; }
 .app.mode-simple .simple {
@@ -408,6 +410,7 @@ input[type="range"] { width: 100%; accent-color: var(--sun); }
 .readout dl { display: grid; grid-template-columns: 92px 1fr; gap: 3px 8px; margin: 0; }
 .readout dt { color: var(--muted); }
 .readout dd { margin: 0; font-family: var(--mono); font-size: 12.5px; }
+.readout dd.alert, .simple-card dd.alert { color: var(--warn); }
 .readout-note {
   margin: 8px 0 0;
   padding-top: 8px;
@@ -503,6 +506,25 @@ input[type="range"] { width: 100%; accent-color: var(--sun); }
 }
 .panel p { margin: 0 0 8px; color: var(--ink); }
 .panel .muted { color: var(--muted); }
+.solve-row { display: flex; gap: 8px; }
+.solve-row label { flex: 1 1 0; min-width: 0; }
+#solve-form { display: flex; flex-direction: column; gap: 8px; }
+.solve-list { display: flex; flex-direction: column; gap: 6px; }
+.solve-list button {
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 7px 9px;
+}
+.solve-list button:hover { border-color: var(--line-strong); }
+.solve-list b { display: block; font-family: var(--mono); font-size: 12px; }
+.solve-list span { color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+
+.compare-table .delta { font-size: 11px; }
+.compare-table .delta.up { color: var(--good); }
+.compare-table .delta.down { color: var(--warn); }
+
 .window-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .window-list button {
   text-align: left;

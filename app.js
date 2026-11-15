@@ -10,6 +10,7 @@
   var MAX_SITES = 3;
   var STORE_KEY = "lunar-horizon-custom-sites";
   var PLAY_SPAN_MS = 24000;
+  var SLIP_CHOICES = ["0", "-29.5", "-14", "-7", "7", "14", "29.5"];
 
   /* ---------- small helpers ---------- */
 
@@ -160,6 +161,16 @@
       site: "change4",
       label: "Where Earth never rises",
       teaser: "Chang\u2019e 4 on the far side, and what libration cannot fix"
+    },
+    {
+      /* Centred on the 2026-08-28 lunar eclipse, which from the Moon is a solar
+         eclipse. Starts a day early so the approach is in the window. */
+      id: "eclipse",
+      site: "mouton",
+      label: "The one outage you can predict",
+      teaser: "2026-08-28: Earth crosses in front of the Sun",
+      epoch: Date.UTC(2026, 7, 27, 0, 0),
+      hours: 48
     }
   ];
 
@@ -189,7 +200,9 @@
     search: "",
     playing: false,
     scanning: false,
-    windows: []
+    windows: [],
+    slipDays: 14,
+    solve: null
   };
 
   function allSites() {
@@ -250,18 +263,20 @@
 
   var cache = {};
 
-  function cacheKey(site, panel) {
+  function cacheKey(site, panel, startMs) {
     return [
-      site.id, site.lat, site.lon, state.landingMs, missionMs(), state.maskDeg,
+      site.id, site.lat, site.lon, startMs, missionMs(), state.maskDeg,
       terrainFor(site) ? "lola" : "flat",
       panel.tiltDeg, panel.tracking ? 1 : 0, panel.azimuthDeg, panel.efficiency
     ].join("|");
   }
 
-  function missionFor(site, panel) {
-    var key = cacheKey(site, panel);
+  /* The epoch is a parameter, not state, because the slip comparison runs the
+     same mission from a different start and must not disturb the live one. */
+  function missionAt(site, panel, startMs) {
+    var key = cacheKey(site, panel, startMs);
     if (cache[key]) return cache[key];
-    var samples = LunarEph.sampleMission(new Date(state.landingMs), missionMs(), site.lat, site.lon, {
+    var samples = LunarEph.sampleMission(new Date(startMs), missionMs(), site.lat, site.lon, {
       maskDeg: maskFor(site),
       panel: panel
     });
@@ -272,8 +287,15 @@
     return entry;
   }
 
+  function missionFor(site, panel) {
+    return missionAt(site, panel, state.landingMs);
+  }
+
+  /* Solve results name times inside one specific mission, so they go stale the
+     moment the mission does. Clearing them here means every caller is covered. */
   function dropCache() {
     cache = {};
+    state.solve = null;
   }
 
   /* ---------- events from samples ---------- */
@@ -314,6 +336,19 @@
     return usable ? out : null;
   }
 
+  /* Azimuth wraps at 360, so interpolate along the shortest arc. A sunset at
+     due north is a 359 -> 1 step, and a naive lerp would report 180. */
+  function lerpAz(a, b, f) {
+    var d = ((b - a + 540) % 360) - 180;
+    return ((a + d * f) % 360 + 360) % 360;
+  }
+
+  /* All three DSN complexes sit inside Earth's ~1.9-degree disk as seen from the
+     Moon, so Earth's azimuth is the link's azimuth to well under a degree. */
+  function azOf(sample, which) {
+    return which === "sun" ? sample.sunAz : sample.earthAz;
+  }
+
   function walkCrossing(samples, fromMs, which, mask, wantRise) {
     for (var i = 0; i < samples.length - 1; i++) {
       if (samples[i + 1].t <= fromMs) continue;
@@ -323,9 +358,15 @@
       var setting = a > 0 && b <= 0;
       if ((wantRise && rising) || (!wantRise && setting)) {
         var span = b - a;
-        var frac = span === 0 ? 0 : (0 - a) / span;
-        var t = samples[i].t + (samples[i + 1].t - samples[i].t) * clamp(frac, 0, 1);
-        if (t >= fromMs) return t;
+        var frac = clamp(span === 0 ? 0 : (0 - a) / span, 0, 1);
+        var t = samples[i].t + (samples[i + 1].t - samples[i].t) * frac;
+        if (t >= fromMs) {
+          return {
+            kind: wantRise ? "rise" : "set",
+            t: t,
+            azDeg: lerpAz(azOf(samples[i], which), azOf(samples[i + 1], which), frac)
+          };
+        }
       }
     }
     return null;
@@ -337,13 +378,178 @@
     return wantRise ? "linkUp" : "linkDown";
   }
 
+  function azAt(samples, t, which) {
+    for (var i = 0; i < samples.length - 1; i++) {
+      if (t >= samples[i].t && t <= samples[i + 1].t) {
+        var span = samples[i + 1].t - samples[i].t;
+        var f = span === 0 ? 0 : (t - samples[i].t) / span;
+        return lerpAz(azOf(samples[i], which), azOf(samples[i + 1], which), f);
+      }
+    }
+    return null;
+  }
+
+  /* -> {kind, t, azDeg} or null. Null is a real answer: at Shackleton the Sun may
+     not set inside the window, and on the far side Earth never rises at all. */
   function nextCrossing(samples, fromMs, which, mask, wantRise) {
     var fromEngine = engineEvents(samples, fromMs, mask);
     if (fromEngine) {
       var hit = fromEngine[eventKeyFor(which, wantRise)];
-      if (hit && isFinite(hit.t) && hit.t >= fromMs) return hit.t;
+      if (hit && isFinite(hit.t) && hit.t >= fromMs) {
+        return {
+          kind: wantRise ? "rise" : "set",
+          t: hit.t,
+          azDeg: azAt(samples, hit.t, which)
+        };
+      }
     }
     return walkCrossing(samples, fromMs, which, mask, wantRise);
+  }
+
+  /* ---------- eclipses ----------
+
+     Seen from the Moon, a lunar eclipse is a SOLAR eclipse: Earth crosses in
+     front of the Sun. The engine's sunFrac only models the skyline occulting the
+     Sun, so without this an eclipse reads as full power.
+
+     Everything needed is already on every sample: both angular radii, and both
+     alt/az pairs. Session A is bringing LunarEph.eclipseAt with the same
+     meaning; when it lands, delete this and call it. */
+
+  var RAD = Math.PI / 180;
+
+  function angularSep(az1, alt1, az2, alt2) {
+    var c1 = Math.cos(alt1 * RAD);
+    var c2 = Math.cos(alt2 * RAD);
+    var dot = c1 * c2 * Math.cos((az1 - az2) * RAD) + Math.sin(alt1 * RAD) * Math.sin(alt2 * RAD);
+    return Math.acos(clamp(dot, -1, 1)) / RAD;
+  }
+
+  /* Fraction of the solar disk's AREA hidden behind Earth's disk: the overlap of
+     two circles over the area of the smaller one. */
+  function overlapFraction(d, R, r) {
+    if (!(R > 0) || !(r > 0)) return 0;
+    if (d >= R + r) return 0;
+    if (d <= R - r) return 1;
+    if (d <= r - R) return (R * R) / (r * r);
+    var a = r * r * Math.acos(clamp((d * d + r * r - R * R) / (2 * d * r), -1, 1));
+    var b = R * R * Math.acos(clamp((d * d + R * R - r * r) / (2 * d * R), -1, 1));
+    var c = 0.5 * Math.sqrt(Math.max(0,
+      (-d + r + R) * (d + r - R) * (d - r + R) * (d + r + R)));
+    return clamp((a + b - c) / (Math.PI * r * r), 0, 1);
+  }
+
+  function eclipseAt(sample) {
+    var sep = angularSep(sample.sunAz, sample.sunAlt, sample.earthAz, sample.earthAlt);
+    var obs = overlapFraction(sep, sample.earthRadius, sample.sunRadius);
+    var kind = "none";
+    if (obs >= 1) kind = "total";
+    else if (obs > 0) kind = "partial";
+    return { sepDeg: sep, obscuration: obs, kind: kind };
+  }
+
+  /* Contiguous runs of obscuration > 0, with the peak inside each run. */
+  function eclipsesIn(samples) {
+    var out = [];
+    var open = null;
+    for (var i = 0; i < samples.length; i++) {
+      var e = eclipseAt(samples[i]);
+      if (e.obscuration > 0) {
+        if (!open) open = { startMs: samples[i].t, peakMs: samples[i].t, endMs: samples[i].t, maxObscuration: 0, kind: "partial" };
+        open.endMs = samples[i].t;
+        if (e.obscuration > open.maxObscuration) {
+          open.maxObscuration = e.obscuration;
+          open.peakMs = samples[i].t;
+          open.kind = e.kind;
+        }
+      } else if (open) {
+        out.push(open);
+        open = null;
+      }
+    }
+    if (open) out.push(open);
+    return out;
+  }
+
+  /* Watt-hours the mission total over-counts, because the engine's lit fraction
+     does not know about Earth. Trapezoid over the samples inside the run. */
+  function eclipseEnergyLoss(samples, run) {
+    var wh = 0;
+    for (var i = 0; i < samples.length - 1; i++) {
+      var a = samples[i];
+      var b = samples[i + 1];
+      if (b.t < run.startMs || a.t > run.endMs) continue;
+      var lossA = a.power * eclipseAt(a).obscuration;
+      var lossB = b.power * eclipseAt(b).obscuration;
+      wh += (lossA + lossB) / 2 * ((b.t - a.t) / HOUR);
+    }
+    return wh;
+  }
+
+  /* ---------- inverse position ----------
+
+     The forward question is "where is the Sun at time T". A planner asks the
+     inverse: "when is the Sun where I need it". Session A is bringing
+     LunarEph.solveFor; this walks the samples the mission already computed. */
+
+  function altOf(sample, which) {
+    return which === "sun" ? sample.sunAlt : sample.earthAlt;
+  }
+
+  /* Signed miss distance from the target, in degrees. Either axis may be null,
+     meaning "do not constrain this one". */
+  function solveMiss(sample, which, target) {
+    if (target.altDeg !== null && target.azDeg !== null) {
+      return angularSep(azOf(sample, which), altOf(sample, which), target.azDeg, target.altDeg);
+    }
+    if (target.altDeg !== null) return altOf(sample, which) - target.altDeg;
+    return ((azOf(sample, which) - target.azDeg + 540) % 360) - 180;
+  }
+
+  function solveFor(samples, which, target) {
+    var both = target.altDeg !== null && target.azDeg !== null;
+    var hits = [];
+    var i;
+    if (both) {
+      /* Two constraints rarely have an exact root, so report closest approach:
+         any sample that is a local minimum of the separation. */
+      for (i = 1; i < samples.length - 1; i++) {
+        var p = solveMiss(samples[i - 1], which, target);
+        var q = solveMiss(samples[i], which, target);
+        var r = solveMiss(samples[i + 1], which, target);
+        if (q <= p && q <= r) {
+          hits.push({
+            t: samples[i].t,
+            azDeg: azOf(samples[i], which),
+            altDeg: altOf(samples[i], which),
+            missDeg: q,
+            exact: q < 0.25
+          });
+        }
+      }
+    } else {
+      for (i = 0; i < samples.length - 1; i++) {
+        var a = solveMiss(samples[i], which, target);
+        var b = solveMiss(samples[i + 1], which, target);
+        if (a === 0 || (a < 0) !== (b < 0)) {
+          /* An azimuth miss jumps 180 -> -180 at the antipode; that sign change
+             is the wrap, not a crossing. */
+          if (Math.abs(b - a) > 180) continue;
+          var span = b - a;
+          var f = clamp(span === 0 ? 0 : (0 - a) / span, 0, 1);
+          var step = samples[i + 1].t - samples[i].t;
+          hits.push({
+            t: samples[i].t + step * f,
+            azDeg: lerpAz(azOf(samples[i], which), azOf(samples[i + 1], which), f),
+            altDeg: altOf(samples[i], which) + (altOf(samples[i + 1], which) - altOf(samples[i], which)) * f,
+            missDeg: 0,
+            exact: true
+          });
+        }
+      }
+    }
+    hits.sort(function (x, y) { return x.t - y.t; });
+    return hits.slice(0, 12);
   }
 
   /* ---------- model for viz ---------- */
@@ -453,12 +659,36 @@
     el("season").innerHTML = "<b>Subsolar latitude " + deg(lat, 2) + "</b><span>" + esc(phrase) + "</span>";
   }
 
+  /* "Sunset in 3 d 14 h, at azimuth 274" is the line the brief calls critical
+     operational information. A null is printed as a sentence, never as a blank:
+     "the Sun does not set here" is an answer, and at the pole it is the answer. */
   function eventLine(mission, now, which) {
     var isUp = which === "sun" ? now.lit : now.dte;
-    var t = nextCrossing(mission.samples, state.playheadMs, which, state.maskDeg, !isUp);
+    var hit = nextCrossing(mission.samples, state.playheadMs, which, state.maskDeg, !isUp);
     var label = which === "sun" ? (isUp ? "Sunset" : "Sunrise") : (isUp ? "Link loss" : "Link return");
-    if (t === null) return label + ": none in this mission";
-    return label + " " + utcStamp(t) + " (in " + msHours(t - state.playheadMs) + ")";
+    if (!hit) {
+      var body = which === "sun" ? "the Sun" : "the link";
+      return label + ": never \u2014 " + body + " stays " +
+        (isUp ? "up" : "down") + " for the whole window";
+    }
+    var az = isFinite(hit.azDeg) ? ", at " + azDeg(hit.azDeg) + " az" : "";
+    return label + " in " + msHours(hit.t - state.playheadMs) + az +
+      " \u00b7 " + utcStamp(hit.t);
+  }
+
+  function eclipseLine(entry) {
+    var e = eclipseAt(entry.now);
+    if (e.obscuration > 0) {
+      return "<dt>Eclipse</dt><dd class=\"alert\">Earth is covering " + pct(e.obscuration) +
+        " of the Sun \u00b7 " + esc(e.kind) + "</dd>";
+    }
+    var list = eclipsesIn(entry.samples).filter(function (x) { return x.peakMs >= state.playheadMs; });
+    if (!list.length) {
+      return "<dt>Eclipse</dt><dd>None ahead in this window \u00b7 Earth transits the Sun about twice a year</dd>";
+    }
+    var next = list[0];
+    return "<dt>Eclipse</dt><dd>Earth crosses the Sun in " +
+      msHours(next.peakMs - state.playheadMs) + " \u00b7 " + pct(next.maxObscuration) + " covered</dd>";
   }
 
   function renderReadout(model) {
@@ -475,6 +705,12 @@
     if (now.lit && now.sunAlt < 1 && now.sunAlt > -1) {
       notes.push("The Sun is part-risen: only a slice of the disk clears the mask.");
     }
+    var ecl = eclipseAt(now);
+    if (ecl.obscuration > 0) {
+      notes.push("Earth is in front of the Sun, and the watts above do not know it: the engine\u2019s lit " +
+        "fraction models the horizon mask, not Earth. Scale the power by " +
+        (1 - ecl.obscuration).toFixed(2) + " for this instant.");
+    }
 
     el("readout").innerHTML =
       '<div class="kicker">Playhead \u00b7 UTC</div>' +
@@ -488,6 +724,7 @@
       "<dt>Power</dt><dd>" + now.power.toFixed(0) + " W/m\u00b2 at " + state.efficiencyPct + "% cells</dd>" +
       "<dt>Next</dt><dd>" + esc(eventLine(primary, now, "sun")) + "</dd>" +
       "<dt></dt><dd>" + esc(eventLine(primary, now, "dte")) + "</dd>" +
+      eclipseLine(primary) +
       "</dl>" +
       (notes.length ? '<p class="readout-note">' + esc(notes.join(" ")) + "</p>" : "");
   }
@@ -563,6 +800,37 @@
         "a ridge finer than that, or one beyond the 100 km these rays reach, erases the margin and with it the claim.</p>" +
         "<p>So the tool refuses to print \u201c100% sunlight\u201d on its own. The margin is reported every time, " +
         "because a number without its error bar is not a finding.</p>";
+    }
+
+    if (state.story === "eclipse") {
+      var list = eclipsesIn(entry.samples);
+      if (!list.length) {
+        return "<h3>No eclipse in this window</h3><p>Nothing covers the Sun here between " +
+          utcStamp(state.landingMs) + " and the end of the window.</p>";
+      }
+      var ec = list[0];
+      var peak = entry.samples.reduce(function (best, s) {
+        return Math.abs(s.t - ec.peakMs) < Math.abs(best.t - ec.peakMs) ? s : best;
+      }, entry.samples[0]);
+      var at = eclipseAt(peak);
+      return "<h3>Earth covers " + '<span class="figure">' + pct(ec.maxObscuration) +
+        "</span> of the Sun on " + utcStamp(ec.peakMs) + "</h3>" +
+        "<p>Seen from Earth this is a lunar eclipse. Seen from the ground at " + esc(entry.name) +
+        " it is a <b>solar</b> eclipse: Earth passes in front of the Sun. At peak the two are " +
+        '<span class="figure">' + deg(at.sepDeg, 3) + "</span> apart in the sky, inside Earth\u2019s " +
+        deg(peak.earthRadius, 2) + " disk, and the whole event runs " +
+        msHours(ec.endMs - ec.startMs) + ".</p>" +
+        "<p>For a solar-powered lander this is the one total outage you can predict years ahead " +
+        "and size a battery for. The Sun is at " + deg(peak.sunAlt, 1) + " altitude and " +
+        azDeg(peak.sunAz) + " azimuth when it happens, so there is nowhere to point an array to avoid it.</p>" +
+        "<p>It is also a free check on the whole engine. An eclipse <em>is</em> Sun and Earth at the " +
+        "same place in the sky, and this tool computes those two directions by completely separate paths. " +
+        "They agree to " + deg(at.sepDeg, 3) + ". No sign error in the lunar rotation survives that.</p>" +
+        "<p class=\"margin-note\">Known limit: the power and sunlight figures elsewhere on this page still " +
+        "read " + pct(peak.sunFrac) + " of the disk at peak, because the engine\u2019s lit fraction models the " +
+        "horizon mask occulting the Sun and not Earth occulting it. The eclipse geometry above is right; " +
+        "the energy total over this window is optimistic by " +
+        energy(eclipseEnergyLoss(entry.samples, ec)) + "/m\u00b2.</p>";
     }
 
     if (state.story === "silence") {
@@ -683,6 +951,8 @@
           : "uniform " + deg(state.maskDeg, 1) + " mask") + "</dd>" +
         "<dt>Sun now</dt><dd>" + deg(now.sunAlt) + " alt \u00b7 " + azDeg(now.sunAz) + " az</dd>" +
         "<dt>Earth now</dt><dd>" + deg(now.earthAlt) + " alt \u00b7 " + (now.dte ? "link up" : "no link") + "</dd>" +
+        "<dt>Next</dt><dd>" + esc(eventLine(entry, now, "sun")) + "</dd>" +
+        eclipseLine(entry) +
       "</dl>" +
       note +
       '<p class="source">' + hours(state.durationHours) + " from " + utcStamp(state.landingMs) +
@@ -870,6 +1140,141 @@
     }).join("") + '<p class="help">A 6-hour screen, not a flight product. Open a date to read it at full resolution.</p>';
   }
 
+  /* ---------- inverse position, eclipses, slip ---------- */
+
+  function renderSolve() {
+    var list = el("solve-list");
+    var found = state.solve;
+    if (!found) {
+      list.innerHTML = "";
+      return;
+    }
+    if (found.message) {
+      list.innerHTML = '<p class="help">' + esc(found.message) + "</p>";
+      return;
+    }
+    if (!found.hits.length) {
+      list.innerHTML = '<p class="help">' + esc(found.label) +
+        " never happens in this window. Try a longer mission, another site, or leave one axis free.</p>";
+      return;
+    }
+    list.innerHTML = '<p class="help">' + esc(found.label) + " \u00b7 " +
+      found.hits.length + (found.hits.length === 1 ? " time" : " times") + ".</p>" +
+      found.hits.map(function (hit) {
+        return '<button type="button" data-solve="' + Math.round(hit.t) + '">' +
+          "<b>" + utcStamp(hit.t) + "</b><span>" + deg(hit.altDeg) + " alt \u00b7 " +
+          azDeg(hit.azDeg) + " az \u00b7 " + msHours(hit.t - state.landingMs) + " after landing" +
+          (hit.exact ? "" : " \u00b7 closest approach " + deg(hit.missDeg, 2)) +
+          "</span></button>";
+      }).join("");
+  }
+
+  function runSolve() {
+    if (!lastModel || !lastModel.sites.length) return;
+    var altRaw = el("solve-alt").value.trim();
+    var azRaw = el("solve-az").value.trim();
+    var wantAlt = altRaw === "" ? null : parseFloat(altRaw);
+    var wantAz = azRaw === "" ? null : parseFloat(azRaw);
+
+    if ((altRaw !== "" && !isFinite(wantAlt)) || (azRaw !== "" && !isFinite(wantAz))) {
+      state.solve = { message: "Elevation and azimuth have to be numbers, in degrees." };
+    } else if (wantAlt === null && wantAz === null) {
+      state.solve = { message: "Give an elevation, an azimuth, or both. Both empty asks for every moment in the mission." };
+    } else {
+      var parts = [];
+      if (wantAlt !== null) parts.push("elevation " + deg(wantAlt, 1));
+      if (wantAz !== null) parts.push("azimuth " + azDeg(wantAz));
+      state.solve = {
+        message: null,
+        label: "Sun at " + parts.join(" and "),
+        hits: solveFor(lastModel.sites[0].samples, "sun", { altDeg: wantAlt, azDeg: wantAz })
+      };
+    }
+    renderSolve();
+  }
+
+  /* An eclipse is the one total power loss a lander can put on a calendar, so it
+     gets a jump button. Disabled is the honest answer when there is none in the
+     window: eclipses come about twice a year, not twice a lunar day. */
+  function syncEclipseButton(model) {
+    var button = el("eclipse-btn");
+    var list = eclipsesIn(model.sites[0].samples);
+    button.disabled = !list.length;
+    button.title = list.length
+      ? "Jump to " + utcStamp(list[0].peakMs) + ", when Earth covers " +
+        pct(list[0].maxObscuration) + " of the Sun"
+      : "No eclipse at this site inside this mission";
+  }
+
+  function jumpToEclipse() {
+    if (!lastModel || !lastModel.sites.length) return;
+    var list = eclipsesIn(lastModel.sites[0].samples);
+    if (!list.length) return;
+    var next = null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].peakMs > state.playheadMs + 60000) {
+        next = list[i];
+        break;
+      }
+    }
+    stopPlay();
+    setPlayhead((next || list[0]).peakMs);
+    render();
+  }
+
+  /* "What if we slip two weeks" is the question a launch delay actually asks.
+     Same site, same array, same mask, one epoch moved. */
+  function renderSlip(model) {
+    var host = el("slip-table");
+    /* Hidden in Simple mode, and sampling a second mission is the most expensive
+       thing on this page, so do not pay for it when nobody can see it. */
+    if (!state.slipDays || state.ui === "simple") {
+      host.innerHTML = "";
+      return;
+    }
+    var panel = panelSpec();
+    var slipMs = state.slipDays * DAY;
+
+    /* A delta that rounds to zero against two figures that print the same is
+       noise, so it is dropped rather than shown as "+0". */
+    function cell(a, b, fmt, delta) {
+      var shown = fmt(a) + " \u2192 " + fmt(b);
+      var d = b - a;
+      if (fmt(a) === fmt(b)) return '<td class="num">' + shown + "</td>";
+      return '<td class="num">' + shown + ' <span class="delta ' + (d >= 0 ? "up" : "down") + '">' +
+        (d >= 0 ? "+" : "\u2212") + delta(Math.abs(d)) + "</span></td>";
+    }
+
+    function pctCell(a, b) {
+      return cell(a, b, pct, function (x) { return (x * 100).toFixed(0); });
+    }
+
+    function energyCell(a, b) {
+      return cell(a, b, energy, energy);
+    }
+
+    var rows = model.sites.map(function (entry) {
+      var a = entry.summary;
+      var b = missionAt(entry.site, panel, state.landingMs + slipMs).summary;
+      return '<tr><td><i class="swatch" style="background:' + entry.color + '"></i>' +
+        esc(entry.name) + "</td>" +
+        pctCell(a.sunlitFrac, b.sunlitFrac) +
+        energyCell(a.energyWh, b.energyWh) +
+        pctCell(a.dteFrac, b.dteFrac) +
+        '<td class="num">' + msHours(a.longestNight.ms) + " \u2192 " + msHours(b.longestNight.ms) + "</td></tr>";
+    }).join("");
+
+    host.innerHTML = '<section class="panel compare-panel">' +
+      '<div class="block-title">Same place, ' + Math.abs(state.slipDays) +
+      " days " + (state.slipDays < 0 ? "earlier" : "later") + "</div>" +
+      '<table class="compare-table"><tr><th>Site</th><th class="num">Sunlight</th>' +
+      '<th class="num">Energy/m\u00b2</th><th class="num">Direct to Earth</th>' +
+      '<th class="num">Longest night</th></tr>' + rows + "</table>" +
+      '<p class="help">Left of each arrow is the landing epoch you set, right of it is ' +
+      utcStamp(state.landingMs + slipMs) + ". Near the pole a slip of a week or two can invert the " +
+      "answer, because it moves the Sun to the other side of the same rim.</p></section>";
+  }
+
   /* The globe takes the whole catalogue, not just the selection, because its
      whole job is letting you pick. The subsolar point in `now` is what places
      the terminator, so the lighting is the ephemeris, not decoration. */
@@ -934,8 +1339,11 @@
       renderSiteNote();
       renderMetrics(model);
       renderCompare(model);
+      renderSlip(model);
       renderInsights(model);
       renderWindows();
+      renderSolve();
+      syncEclipseButton(model);
     }
     drawCanvases(model);
   }
@@ -982,8 +1390,8 @@
   function applyStory(story) {
     state.story = story.id;
     state.selected = [story.site];
-    state.landingMs = STORY_EPOCH;
-    state.durationHours = STORY_HOURS;
+    state.landingMs = isFinite(story.epoch) ? story.epoch : STORY_EPOCH;
+    state.durationHours = isFinite(story.hours) ? story.hours : STORY_HOURS;
     state.maskDeg = 0;
     state.terrain = !!terrain;
   }
@@ -1229,6 +1637,7 @@
     params.set("trk", state.tracking ? "1" : "0");
     params.set("az", String(state.azimuthDeg));
     params.set("eff", String(state.efficiencyPct));
+    params.set("slip", String(state.slipDays));
     var hash = "#" + params.toString();
     if (window.location.hash !== hash) {
       try {
@@ -1286,6 +1695,10 @@
     if (isFinite(az)) state.azimuthDeg = clamp(az, 0, 359);
     var eff = parseFloat(params.get("eff"));
     if (isFinite(eff)) state.efficiencyPct = clamp(eff, 15, 40);
+    /* The slip select only holds these, and a value it cannot show would leave
+       the control blank while the table below it said something else. */
+    var slip = params.get("slip");
+    if (SLIP_CHOICES.indexOf(slip) >= 0) state.slipDays = parseFloat(slip);
     return touched;
   }
 
@@ -1324,6 +1737,7 @@
     el("efficiency").value = String(state.efficiencyPct);
     el("mask").value = String(state.maskDeg);
     el("duration").value = String(state.durationHours);
+    el("slip").value = String(state.slipDays);
     el("map-mode").value = state.mapMode;
     syncTerrainInputs();
 
@@ -1482,7 +1896,26 @@
     el("now-btn").addEventListener("click", function () {
       setLanding(Math.floor(Date.now() / HOUR) * HOUR, false);
     });
+    el("eclipse-btn").addEventListener("click", jumpToEclipse);
     el("play").addEventListener("click", togglePlay);
+
+    el("slip").addEventListener("change", function () {
+      state.slipDays = parseFloat(el("slip").value);
+      recompute();
+    });
+
+    el("solve-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      runSolve();
+    });
+
+    el("solve-list").addEventListener("click", function (e) {
+      var button = e.target.closest("button[data-solve]");
+      if (!button) return;
+      stopPlay();
+      setPlayhead(Number(button.getAttribute("data-solve")));
+      render();
+    });
 
     el("mode-simple").addEventListener("click", function () {
       setMode("simple");

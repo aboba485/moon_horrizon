@@ -54,15 +54,28 @@ The globe is a hand-drawn orthographic projection on a 2D canvas, not WebGL. Tha
 
 **Expert** is the full console: the site list, the horizon strip, the mission chart, the comparison table, the horizon and array controls, the date scan, and the CSV export. Nothing is removed in Simple mode, only hidden, and the mode is carried in the URL hash as `ui=simple` or `ui=expert`.
 
-### The three findings
+### The four findings
 
-Above the view are three buttons. Each one sets the site, landing epoch, mission length, and mask to a scenario, flies the globe to it, and writes a short reading underneath. Every figure in that reading is pulled from the model that was just computed, not from a stored string, so the text cannot drift away from the engine.
+Above the view are four buttons. Each one sets the site, landing epoch, mission length, and mask to a scenario, flies the globe to it, and writes a short reading underneath. Every figure in that reading is pulled from the model that was just computed, not from a stored string, so the text cannot drift away from the engine.
 
 - **The rim that eats the Sun** — Shackleton, computed twice. The smooth-sphere counterfactual is calculated on the spot at mask 0, so the 100% versus 48% comparison is two live runs of the same engine with and without the LOLA profile.
 - **A whole lunar day of sunlight** — Mons Mouton holds the Sun for the entire window, and the reading names the date and bearing where the solar limb comes closest to the skyline. The tool will not print 100% without that margin.
 - **Where Earth never rises** — Chang'e 4, where Earth's altitude never rises above −38°, against Slater Plain, where libration lifts Earth over the horizon for about a third of the month despite being past the mean-Earth hemisphere.
+- **The one outage you can predict** — the 2026-08-28 eclipse at Mons Mouton. Seen from Earth that is a lunar eclipse; seen from the ground on the Moon it is a *solar* eclipse, and for a solar-powered lander it is the single scheduled total power loss of the mission.
 
-The active finding rides the URL hash as `st=rim`, `st=margin`, or `st=silence`, so each one is a shareable link. Picking any site by hand clears it.
+The active finding rides the URL hash as `st=rim`, `st=margin`, `st=silence`, or `st=eclipse`, so each one is a shareable link. Picking any site by hand clears it.
+
+### Events, inverse positions, and eclipses
+
+**When the next thing happens, and on what bearing.** The readout's *Next* rows give a countdown to the next sunrise or sunset and to the next loss or return of the direct link, each with the **azimuth** the body will be at when it crosses. A bearing is operational information — it is where the array has to be pointing and where the ridge that matters is. Azimuth is interpolated along the shortest arc across the 0°/360° seam, so a crossing due north reports north rather than south. When there is no crossing inside the window the row says so in a sentence: *"Sunset: never — the Sun stays up for the whole window."* At a polar site that is not a missing answer, it is the answer.
+
+**Find a Sun position.** The inverse question. Give an elevation, an azimuth, or both, and the tool lists every time inside the mission that matches, with the bearing and the time after landing; clicking a result moves the playhead there. With one axis constrained the crossing is found by interpolating a sign change, so the time is exact. With both constrained it reports closest approach instead, with the miss distance, because two constraints rarely have an exact root. Nothing matching is printed as a sentence rather than an empty list.
+
+**Eclipses.** From the surface of the Moon, a lunar eclipse is a solar eclipse: Earth passes in front of the Sun. The tool computes the angular separation between the two bodies and the circle–circle overlap of their disks for every sample, so obscuration is an area fraction and not a yes/no. **Next eclipse** jumps the playhead to the peak; it is disabled, with the reason in its tooltip, when there is no eclipse at this site inside the window, which is the usual case — eclipses come roughly twice a year, not twice a lunar day.
+
+An eclipse is also a free end-to-end check on the whole rotation chain. At peak the Sun and Earth must share both an azimuth and an elevation from any site on the Moon, and the tool derives those two directions by entirely separate paths. On 2026-08-28 at Mons Mouton they agree to 0.604°, inside Earth's 0.94° disk radius. No sign error in the lunar orientation survives that.
+
+**If we slip.** A launch delay is the most common change to a plan, so it is a control rather than something to recompute by hand. Pick an offset — a week or two either way, or a full lunar day — and a table under the comparison runs the same site, array, and mask from the shifted epoch, showing sunlight, energy, direct-to-Earth time, and longest night as *before → after* with the delta. Near the pole two weeks can invert the answer, because it moves the Sun to the other side of the same rim.
 
 Below the view, **Where the data comes from, and how it was checked** lists the four NASA and NASA-derived inputs the tool depends on, what each one is load-bearing for, and the full Horizons comparison table with the per-case deltas.
 
@@ -72,8 +85,10 @@ Below the view, **Where the data comes from, and how it was checked** lists the 
 - The landing epoch is the start of the window. The playhead scrubs inside the window and drives the horizon view and the readout; it does not move the landing date.
 - Drag or click the chart to move the playhead. Space plays and pauses, arrow keys step one hour, Shift and an arrow steps one day.
 - **Scan the next year** ranks start times for the primary site at the current mission length, mask, and array. It is a 6-hour screen, not a flight product; click a result to open that date at full resolution.
+- **Next eclipse** moves the playhead to the next time Earth crosses the Sun at the primary site. **If we slip** sets the offset for the comparison table.
+- **Find a Sun position**, in the left column, answers the inverse question: when is the Sun at this elevation or bearing. Clicking a result jumps the playhead.
 - **Download CSV** exports the primary site's samples: `time_utc, sun_alt_deg, sun_az_deg, earth_alt_deg, earth_az_deg, sun_frac, earth_disk, dte, joint, irradiance_w_m2, power_w_m2`.
-- The URL hash carries the scenario (interface mode, sites, landing time, mission hours, mask, array, efficiency), so a link reloads the same trade. Custom coordinates are kept in `localStorage` on the machine that entered them.
+- The URL hash carries the scenario (interface mode, sites, landing time, mission hours, mask, array, efficiency, slip offset), so a link reloads the same trade. Custom coordinates are kept in `localStorage` on the machine that entered them.
 
 ## Agreement with JPL Horizons
 
@@ -154,5 +169,7 @@ And one result worth reading carefully. Mons Mouton holds the Sun for an entire 
 ## Limits
 
 The skyline is binned at one degree of azimuth, so a knife-edge ridge is smoothed. Rays stop at 100 km, so a mountain beyond that is invisible. Sites north of 79°S have no profile at all and fall back to the uniform mask. There is no self-shadowing of local slopes, no light scattered from nearby terrain, and no thermal model. Dust, link budgets, landing hazards, and traverse planning are all outside the model.
+
+**Known limit, stated because the tool will otherwise state it for you.** The engine's lit fraction models the horizon mask occulting the Sun and *not* Earth occulting the Sun, so across an eclipse the power and sunlight totals are optimistic — at the 2026-08-28 peak at Mons Mouton the engine still reads 100% of the disk while Earth is completely covering it. The eclipse geometry and the obscuration fraction are computed correctly and shown; the energy integral is not yet corrected for them. Both the readout at an eclipsed instant and the eclipse finding say so, and name the number: about 1.5 kWh/m² over that event. Do not take an eclipse-spanning energy total at face value.
 
 Use it to compare sites and dates and to understand why polar geometry is hard. Do not use it as a flight product.

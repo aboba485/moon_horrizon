@@ -97,6 +97,17 @@
           <input id="efficiency" type="range" min="15" max="40" step="1" value="30">
         </label>
         <p class="help" id="panel-hint"></p>
+
+        <div class="block-title">Find a Sun position</div>
+        <p class="help">The inverse question. Not where the Sun is now, but when it is where you need it. Leave a field empty to leave that axis free.</p>
+        <form id="solve-form">
+          <div class="solve-row">
+            <label>Elevation<input id="solve-alt" type="number" step="0.1" min="-90" max="90" placeholder="any"></label>
+            <label>Azimuth<input id="solve-az" type="number" step="1" min="0" max="359" placeholder="any"></label>
+          </div>
+          <button class="primary-btn full" type="submit" id="solve-run">Find times in this mission</button>
+        </form>
+        <div class="solve-list" id="solve-list"></div>
       </div>
     </aside>
 
@@ -115,10 +126,22 @@
             <option value="8760">One year</option>
           </select>
         </label>
+        <label class="slip-control">If we slip
+          <select id="slip">
+            <option value="0">no comparison</option>
+            <option value="-29.5">one lunar day earlier</option>
+            <option value="-14">14 days earlier</option>
+            <option value="-7">7 days earlier</option>
+            <option value="7">7 days later</option>
+            <option value="14" selected>14 days later</option>
+            <option value="29.5">one lunar day later</option>
+          </select>
+        </label>
         <div class="control-buttons">
           <button type="button" class="text-btn" id="step-back" title="Landing minus 1 day">−1d</button>
           <button type="button" class="text-btn" id="step-fwd" title="Landing plus 1 day">+1d</button>
           <button type="button" class="text-btn" id="now-btn">Now</button>
+          <button type="button" class="text-btn" id="eclipse-btn" title="Jump the playhead to the next time Earth crosses the Sun">Next eclipse</button>
           <button type="button" class="primary-btn" id="play">Play</button>
         </div>
         <div class="selected-chips" id="chips" aria-label="Sites in this comparison"></div>
@@ -150,6 +173,7 @@
 
       <section class="metrics" id="metrics" aria-label="Mission metrics"></section>
       <div id="compare"></div>
+      <div id="slip-table"></div>
 
       <section class="chart-wrap">
         <div class="chart-bar">
