@@ -633,6 +633,28 @@
     ctx.stroke();
     const primaryIdx = Math.max(0, sites.findIndex((s) => s.id === model.primaryId));
 
+    /* Eclipse bands. The samples already carry the obscuration, and ephemeris.js
+       injects five-minute samples through every eclipse, so a four-hour event
+       survives a year-long grid. It is still a thousandth of that grid wide, so
+       the band takes a 3 px floor: otherwise the one total outage a planner can
+       predict years ahead would be a sub-pixel gap in the Sun trace. */
+    const runs = eclipseRuns(sites[primaryIdx]);
+    let lastLabelX = -Infinity;
+    for (const run of runs) {
+      const xa = x(run.startMs);
+      const bw = Math.max(3, x(run.endMs) - xa);
+      ctx.fillStyle = "rgba(61, 183, 232, 0.2)";
+      ctx.fillRect(xa, m.top, bw, ph);
+      ctx.fillStyle = C.earth;
+      ctx.fillRect(xa, m.top, bw, 2);
+      const cx = xa + bw / 2;
+      if (cx - lastLabelX > 58) {
+        text(ctx, Math.round(run.max * 100) + "%", cx, m.top + 14,
+          { mono: true, align: "center", color: C.earth2, size: 10 });
+        lastLabelX = cx;
+      }
+    }
+
     // The threshold the Sun actually crosses. With a terrain profile that is
     // the skyline on the Sun's own bearing, which moves through the mission,
     // so plot the series the samples carry rather than one flat line.
@@ -711,6 +733,33 @@
     // legend
     text(ctx, "— Sun", m.left + 4, m.top + 12, { color: C.sun, size: 10 });
     text(ctx, "┄ Earth", m.left + 46, m.top + 12, { color: C.earth, size: 10 });
+    if (runs.length) {
+      text(ctx, "▮ Earth over the Sun", m.left + 100, m.top + 12, { color: C.earth2, size: 10 });
+    }
+  }
+
+  /* Contiguous stretches where Earth covers any part of the Sun, with the peak
+     each one reaches. Read off the samples rather than recomputed, so the chart
+     can never disagree with the readout standing next to it. */
+  function eclipseRuns(site) {
+    const out = [];
+    let run = null;
+    for (const s of (site && site.samples) || []) {
+      const ob = s.eclipseObscuration || 0;
+      if (ob > 0) {
+        if (!run) run = { startMs: s.t, endMs: s.t, max: ob };
+        else {
+          run.endMs = s.t;
+          run.max = Math.max(run.max, ob);
+        }
+      } else if (run) {
+        run.endMs = s.t;
+        out.push(run);
+        run = null;
+      }
+    }
+    if (run) out.push(run);
+    return out;
   }
 
   function line(ctx, pts, getV, x, y, color, width, dash) {
