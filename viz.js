@@ -889,7 +889,7 @@
   /* basemap.js ships window.LUNAR_BASEMAP = { src: dataURI, width, height,
      source } — an equirectangular mosaic as a classic script. A data: URI is
      same-origin, so sampling it can never taint a canvas. */
-  const bm = { img: null, data: null, tried: false, polarKey: null, polarBuf: null };
+  const bm = { img: null, data: null, tried: false, polarKey: null, polarBuf: null, polarN: 0, refineTimer: null };
 
   function basemapImage() {
     const def = root.LUNAR_BASEMAP;
@@ -924,15 +924,35 @@
     return bm.data;
   }
 
+  /* A pan or a zoom is a fresh resample, so the sharp buffer cannot be built
+     inside the drag. Paint coarse now, ask for sharp once the hand stops. */
+  function schedulePolarRefine() {
+    if (bm.refineTimer) return;
+    bm.refineTimer = root.setTimeout(() => {
+      bm.refineTimer = null;
+      try { root.dispatchEvent(new Event("lunar-basemap-ready")); } catch (e) { /* stays coarse */ }
+    }, 120);
+  }
+
   /* Polar basemap: resample the equirectangular source through the inverse
-     stereographic, into a small buffer cached per view. ~100k samples, only on
-     pan/zoom change. */
+     stereographic into a buffer cached per view.
+
+     The buffer is then stretched over the whole map, so its size is the
+     resolution on screen — a fixed 320 was a four-fold upscale on a retina
+     display and read as a smudge. Match the device pixels the map covers
+     instead, and stop at 1024: the source has 1024 rows across 180° of
+     latitude, about 5 km a row, and no amount of zoom invents more. */
+  const POLAR_COARSE = 320;
+  const POLAR_MAX = 1024;
+
   function polarBasemap(canvas, w, h, sites, view) {
     const src = basemapData();
     if (!src) return null;
-    const N = 320;
+    const dpr = root.devicePixelRatio || 1;
+    const want = Math.max(POLAR_COARSE, Math.min(POLAR_MAX, Math.ceil(Math.max(w, h) * dpr / 64) * 64));
     const key = [w, h, polarSpanDeg(sites).toFixed(2), view.zoom.toFixed(3), view.panX.toFixed(1), view.panY.toFixed(1)].join("|");
-    if (bm.polarKey === key) return bm.polarBuf;
+    if (bm.polarKey === key && bm.polarN >= want) return bm.polarBuf;
+    const N = bm.polarKey === key ? want : POLAR_COARSE;
     if (!bm.polarBuf) {
       bm.polarBuf = root.document.createElement("canvas");
     }
@@ -961,6 +981,8 @@
     }
     bctx.putImageData(out, 0, 0);
     bm.polarKey = key;
+    bm.polarN = N;
+    if (N < want) schedulePolarRefine();
     return bm.polarBuf;
   }
 

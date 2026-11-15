@@ -214,8 +214,18 @@
      data: URI — same-origin by definition, so sampling it cannot taint the
      canvas, which matters because this file lives on getImageData. When the
      script is absent the globe keeps its schematic shading. */
-  var TEX_N = 224;
-  var tex = { img: null, data: null, tried: false, buf: null, key: null };
+  /* This buffer is what the disc is made of: it gets scaled straight up to fill
+     the globe, so its size is the resolution the user sees no matter how good
+     the mosaic behind it is. It used to be a flat 224, which on a retina screen
+     meant a five-fold upscale and a soft, smeared Moon.
+
+     Size it to the device pixels the disc actually covers instead, capped where
+     the source runs out: the globe shows one hemisphere, which is half the
+     2048-wide mosaic, so past 1024 there is nothing left to resolve. */
+  var TEX_COARSE = 256;
+  var TEX_MAX = 1024;
+  var tex = { img: null, data: null, tried: false, buf: null, key: null, n: 0 };
+  var refineTimer = null;
 
   function texSource() {
     var def = root.LUNAR_BASEMAP;
@@ -243,32 +253,51 @@
 
   /* Orthographic render of the mosaic for the current camera, into a small
      cached buffer — same approach and cost as the lighting pass. */
+  /* A full-size rebuild is a million inverse projections with trig in the inner
+     loop — fine once, far too slow for every frame of a drag. So a camera move
+     paints the coarse buffer immediately and asks for the sharp one shortly
+     after; if the drag is still going, that request is simply superseded. */
+  function scheduleRefine() {
+    if (refineTimer) return;
+    refineTimer = root.setTimeout(function () {
+      refineTimer = null;
+      /* The page already knows this event as "the basemap layer can be drawn
+         better now, redraw". The redraw re-enters here with the same camera and
+         this time builds at full size. */
+      try { root.dispatchEvent(new Event("lunar-basemap-ready")); } catch (e) { /* stays coarse */ }
+    }, 120);
+  }
+
   function textureLayer(ctx, f) {
     var src = texSource();
     if (!src) return false;
     var key = f.lat.toFixed(1) + "|" + f.lon.toFixed(1);
-    if (!tex.buf) {
-      tex.buf = root.document.createElement("canvas");
-      tex.buf.width = TEX_N;
-      tex.buf.height = TEX_N;
-    }
-    if (tex.key !== key) {
+    var dpr = root.devicePixelRatio || 1;
+    var want = Math.max(TEX_COARSE, Math.min(TEX_MAX, Math.ceil(f.R * 2 * dpr / 64) * 64));
+    if (!tex.buf) tex.buf = root.document.createElement("canvas");
+    if (tex.key !== key || tex.n < want) {
+      /* A camera the buffer has never seen starts coarse; one it is already
+         showing is safe to sharpen in place, because that costs a frame the
+         user is not currently dragging through. */
+      var n = tex.key === key ? want : TEX_COARSE;
+      tex.buf.width = n;
+      tex.buf.height = n;
       var bctx = tex.buf.getContext("2d");
-      var out = bctx.createImageData(TEX_N, TEX_N);
+      var out = bctx.createImageData(n, n);
       var d = src.px.data;
-      var half = TEX_N / 2;
+      var half = n / 2;
       var la = f.lat * DEG;
       var lo = f.lon * DEG;
       var sinLa = Math.sin(la);
       var cosLa = Math.cos(la);
       var sinLo = Math.sin(lo);
       var cosLo = Math.cos(lo);
-      for (var py = 0; py < TEX_N; py++) {
+      for (var py = 0; py < n; py++) {
         var ny = (half - py - 0.5) / half;
-        for (var px = 0; px < TEX_N; px++) {
+        for (var px = 0; px < n; px++) {
           var nx = (px + 0.5 - half) / half;
           var rr = nx * nx + ny * ny;
-          var o = (py * TEX_N + px) * 4;
+          var o = (py * n + px) * 4;
           if (rr > 1) { out.data[o + 3] = 0; continue; }
           var nz = Math.sqrt(1 - rr);
           // inverse of toView(): view (nx, ny, nz) back to body lat/lon
@@ -289,6 +318,8 @@
       }
       bctx.putImageData(out, 0, 0);
       tex.key = key;
+      tex.n = n;
+      if (n < want) scheduleRefine();
     }
     ctx.save();
     ctx.beginPath();
