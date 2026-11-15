@@ -795,9 +795,19 @@
         terrain.meta.rayKm + " km. Generated " + esc(terrain.meta.generated) + " by tools/lola-horizon.mjs."
       : "terrain.js is not loaded.";
 
+    /* validation.js lists the inputs the numbers depend on. The basemap is not
+       one of them — nothing is computed from it — but it is NASA imagery on
+       screen, so it is credited here rather than left unattributed. */
+    var basemapLine = window.LUNAR_BASEMAP
+      ? "The Moon shown on the map and the globe is " + esc(window.LUNAR_BASEMAP.source) +
+        ", " + window.LUNAR_BASEMAP.width + "\u00d7" + window.LUNAR_BASEMAP.height +
+        ", public domain. It is a picture, not an input: no number in this tool is read from it."
+      : "";
+
     body.innerHTML =
       "<h3>NASA data this project runs on</h3>" + sources +
       '<p class="repro">' + terrainLine + "</p>" +
+      (basemapLine ? '<p class="repro">' + basemapLine + "</p>" : "") +
       "<h3>Checked against JPL Horizons</h3>" +
       "<table><tr><th>Case</th><th class=\"num\">This tool az / el</th><th class=\"num\">Horizons az / el</th>" +
       "<th class=\"num\">\u0394az</th><th class=\"num\">\u0394el</th><th></th></tr>" + rows + "</table>" +
@@ -1237,6 +1247,9 @@
 
   var lastModel = null;
   var lastTextMs = 0;
+  /* Set by attachMap once the map is wired; calling it returns the map to the
+     whole disc. */
+  var resetMapView = null;
 
   function render(opts) {
     var options = opts || {};
@@ -1872,15 +1885,38 @@
       });
     }
 
-    el("map").addEventListener("click", function (e) {
-      if (!window.LunarViz || !lastModel || typeof LunarViz.hitMap !== "function") return;
-      var rect = el("map").getBoundingClientRect();
-      var hit = LunarViz.hitMap(el("map"), lastModel, e.clientX - rect.left, e.clientY - rect.top);
-      if (hit) selectOnly(hit);
+    /* attachMap owns drag, wheel zoom, double-click reset, and the pick, because
+       it is the only thing that can tell a 3 px drag from a click. The view it
+       pans lives in viz.js, so a change is a redraw and not a recompute. */
+    if (window.LunarViz && typeof LunarViz.attachMap === "function") {
+      resetMapView = LunarViz.attachMap(el("map"), {
+        model: function () { return lastModel; },
+        onPick: selectOnly,
+        onChange: function () {
+          if (lastModel) LunarViz.drawMap(el("map"), lastModel);
+        }
+      });
+    } else {
+      el("map").addEventListener("click", function (e) {
+        if (!window.LunarViz || !lastModel || typeof LunarViz.hitMap !== "function") return;
+        var rect = el("map").getBoundingClientRect();
+        var hit = LunarViz.hitMap(el("map"), lastModel, e.clientX - rect.left, e.clientY - rect.top);
+        if (hit) selectOnly(hit);
+      });
+    }
+
+    /* The basemap is a data URI, so it decodes asynchronously and lands after
+       the first paint. viz.js and globe.js both announce it; without this the
+       map and globe keep their vector fallback until the next interaction. */
+    window.addEventListener("lunar-basemap-ready", function () {
+      if (lastModel) drawCanvases(lastModel);
     });
 
     el("map-mode").addEventListener("change", function () {
       state.mapMode = el("map-mode").value;
+      /* A zoom that framed the south pole means nothing on the near side, so
+         switching projection returns to the whole disc. */
+      if (resetMapView) resetMapView();
       recompute();
     });
 

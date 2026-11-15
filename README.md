@@ -28,18 +28,19 @@ cd moon_horrizon
 open index.html        # or double-click it
 ```
 
-Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `features.js`, `ephemeris.js`, `viz.js`, `globe.js`, `terrain.js`, `validation.js`, `app.js`.
+Scripts load in order: `vendor/astronomy.browser.js`, `sites.js`, `features.js`, `basemap.js`, `ephemeris.js`, `viz.js`, `globe.js`, `terrain.js`, `validation.js`, `app.js`.
 
 - `ephemeris.js` is the sky math (`window.LunarEph`).
 - `sites.js` is the site catalogue (`window.LUNAR_SITES`, `window.LUNAR_GROUPS`).
 - `features.js` is the IAU/USGS named-feature catalogue and the per-bearing witness for each LOLA skyline (`window.LUNAR_FEATURES`). It loads before `ephemeris.js` because `featureAtAzimuth` reads it.
+- `basemap.js` is the LROC WAC colour mosaic from the NASA SVS CGI Moon Kit, recompressed to 1024×512 and baked into a `data:` URI (`window.LUNAR_BASEMAP`). Both the map and the globe are textured from it. The URI is same-origin, which matters because `globe.js` shades the terminator by reading pixels back, and a remote tile would taint the canvas and make `getImageData` throw.
 - `viz.js` draws the horizon, the chart, and the map (`window.LunarViz`).
 - `globe.js` draws the rotatable Moon and handles picking (`window.LunarGlobe`).
 - `terrain.js` is the measured LOLA horizon profiles (`window.LUNAR_TERRAIN`), generated offline by `tools/`.
 - `validation.js` is a recorded run of `test/validate.mjs` (`window.LUNAR_VALIDATION`), so the agreement with Horizons is shown in the interface instead of only claimed in this file. Nothing in it is computed by the page.
 - `app.js` is the shell: state, controls, metrics, and the text.
 
-`features.js`, `terrain.js`, and `validation.js` are scripts rather than JSON files on purpose: `fetch()` of a local file is blocked over `file://`, and opening `index.html` by double-clicking it has to keep working.
+`features.js`, `basemap.js`, `terrain.js`, and `validation.js` are scripts rather than JSON or image files on purpose: `fetch()` of a local file is blocked over `file://`, and opening `index.html` by double-clicking it has to keep working.
 
 All times in the interface are UTC and labelled as such. The landing date and time inputs are UTC, not the local zone of the machine.
 
@@ -85,6 +86,7 @@ Below the view, **Where the data comes from, and how it was checked** lists the 
 ### Controls worth knowing
 
 - Click a site row or the map to make it the only selection. The **pin** button adds it to a comparison of up to three. The first chip is primary; clicking a chip promotes it.
+- The map pans by dragging and zooms on the scroll wheel, anchored at the cursor; double-click returns it to the whole disc, as does switching projection. The scale bar regrades as you zoom. A drag is not a click, so panning never changes the selection.
 - The landing epoch is the start of the window. The playhead scrubs inside the window and drives the horizon view and the readout; it does not move the landing date.
 - Drag or click the chart to move the playhead. Space plays and pauses, arrow keys step one hour, Shift and an arrow steps one day.
 - **Scan the next year** ranks start times for the primary site at the current mission length, mask, and array. It is a 6-hour screen, not a flight product; click a result to open that date at full resolution.
