@@ -15,13 +15,14 @@
     font-size: 14px;
   }
   h1 { font-size: 20px; font-weight: 560; margin: 0 0 4px; }
-  p.sub { color: #a79d90; margin: 0 0 18px; }
+  p.sub { color: #a79d90; margin: 0 0 18px; max-width: 72em; }
   .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
   .col { flex: 1 1 560px; min-width: 420px; }
   canvas { display: block; width: 100%; border: 1px solid rgba(243,232,214,0.12); border-radius: 8px; }
-  #horizon { height: 360px; }
+  #horizon { height: 380px; }
   #chart { height: 240px; margin-top: 14px; }
-  #map { width: 420px; height: 420px; flex: 0 0 auto; }
+  #map { width: 440px; height: 440px; flex: 0 0 auto; touch-action: none; }
+  #globe { width: 440px; height: 400px; margin-top: 14px; touch-action: none; }
   .controls { display: flex; gap: 10px; align-items: center; margin: 14px 0; flex-wrap: wrap; }
   button, select {
     background: #221f1a; color: #f4efe6; border: 1px solid rgba(243,232,214,0.28);
@@ -35,7 +36,13 @@
 </head>
 <body>
 <h1>Lunar Horizon — viz demo</h1>
-<p class="sub">One lunar day from 2026-11-14 00:00 UTC, mask 0°, vertical tracking array, 30% cells. All times UTC.</p>
+<p class="sub">
+  One lunar day from 2026-11-14 00:00 UTC, mask 0°, vertical tracking array, 30% cells. All times UTC.
+  Exercises: azimuth/elevation axes, faded traces with 24 h ticks, rise/set markers, skyline
+  attribution, feature labels, map pan/zoom with scale bar and regrading graticule, the baked
+  basemap, and the textured globe. Where Session A's engine calls are not shipped yet, this page
+  installs clearly-marked demo stubs so every drawing path still lights up.
+</p>
 
 <div class="controls">
   <button id="btn-mouton" class="on">Mons Mouton</button>
@@ -58,15 +65,19 @@
         <option value="near">near</option>
         <option value="auto">auto</option>
       </select>
-      <span class="mono" id="hit">click a marker…</span>
+      <span class="mono" id="hit">drag to pan · wheel to zoom · click a marker…</span>
     </div>
+    <canvas id="globe"></canvas>
   </div>
 </div>
 
 <script src="vendor/astronomy.browser.js"></script>
 <script src="sites.js"></script>
+<script src="terrain.js"></script>
+<script src="basemap.js"></script>
 <script src="ephemeris.js"></script>
 <script src="viz.js"></script>
+<script src="globe.js"></script>
 <script>
 (function () {
   "use strict";
@@ -76,18 +87,124 @@
   var PANEL = { tiltDeg: 90, tracking: true, efficiency: 0.3 };
   var STEP = 30 * 60 * 1000;
 
+  /* ---- DEMO STUBS for Session A's round-2 contract, installed only when the
+     real engine call is missing, so this page exercises the drawing paths.
+     They interpolate the already-computed samples; the real implementations
+     bisect the ephemeris and will simply replace them on load order. ---- */
+
+  if (!window.LUNAR_FEATURES) {
+    // Real IAU Gazetteer centre coordinates (same source globe.js cites).
+    window.LUNAR_FEATURES = {
+      meta: { source: "DEMO STUB — IAU Gazetteer values, subset", count: 8 },
+      features: [
+        { name: "Malapert Massif", kind: "mons", lat: -85.99, lon: -2.9, diamKm: 110 },
+        { name: "Mons Mouton", kind: "mons", lat: -85.3, lon: 32.0, diamKm: 115 },
+        { name: "Shackleton", kind: "crater", lat: -89.66, lon: 129.2, diamKm: 21 },
+        { name: "de Gerlache", kind: "crater", lat: -88.5, lon: -87.1, diamKm: 32.4 },
+        { name: "Haworth", kind: "crater", lat: -87.45, lon: -4.0, diamKm: 51.4 },
+        { name: "Nobile", kind: "crater", lat: -85.2, lon: 53.5, diamKm: 73 },
+        { name: "Tycho", kind: "crater", lat: -43.31, lon: -11.36, diamKm: 85 },
+        { name: "Copernicus", kind: "crater", lat: 9.62, lon: -20.08, diamKm: 96 }
+      ]
+    };
+  }
+
+  function stubCrossings(samples, body, maskProfile, maskDeg) {
+    // Linear interpolation of limb-vs-skyline sign changes in the samples.
+    var out = [];
+    function thresholdAt(s) {
+      var alt = body === "sun" ? s.sunAlt : s.earthAlt;
+      var rad = body === "sun" ? s.sunRadius : s.earthRadius;
+      var az = body === "sun" ? s.sunAz : s.earthAz;
+      var m = maskDeg || 0;
+      if (maskProfile && maskProfile.length) {
+        var i = Math.round((((az % 360) + 360) % 360) / 360 * maskProfile.length) % maskProfile.length;
+        m += maskProfile[i];
+      }
+      return alt + rad - m;
+    }
+    for (var i = 0; i + 1 < samples.length; i++) {
+      var a = thresholdAt(samples[i]);
+      var b = thresholdAt(samples[i + 1]);
+      if (a <= 0 === b <= 0) continue;
+      var f = -a / (b - a);
+      var t = samples[i].t + (samples[i + 1].t - samples[i].t) * f;
+      var az0 = body === "sun" ? samples[i].sunAz : samples[i].earthAz;
+      var az1 = body === "sun" ? samples[i + 1].sunAz : samples[i + 1].earthAz;
+      var dAz = ((az1 - az0 + 540) % 360) - 180;
+      var alt0 = body === "sun" ? samples[i].sunAlt : samples[i].earthAlt;
+      var alt1 = body === "sun" ? samples[i + 1].sunAlt : samples[i + 1].earthAlt;
+      out.push({
+        kind: b > 0 ? "rise" : "set",
+        t: t,
+        azDeg: ((az0 + dAz * f) % 360 + 360) % 360,
+        altDeg: alt0 + (alt1 - alt0) * f,
+        refined: false // DEMO STUB: sample-grid accuracy, not bisected
+      });
+    }
+    return out;
+  }
+
+  var demoSamples = {}; // site id -> samples, so the stub can see them
+
+  if (!LunarEph.horizonEvents) {
+    LunarEph.horizonEvents = function (start, durationMs, lat, lon, opts) {
+      var o = opts || {};
+      var key = lat.toFixed(3) + "," + lon.toFixed(3);
+      var samples = demoSamples[key];
+      if (!samples) return [];
+      var mask = o.maskDeg;
+      var profile = mask && mask.profile ? mask.profile : null;
+      var off = mask && mask.profile ? mask.offsetDeg || 0 : mask || 0;
+      return stubCrossings(samples, o.body || "sun", profile, off);
+    };
+    LunarEph.horizonEvents.DEMO_STUB = true;
+  }
+
+  if (!LunarEph.featureAtAzimuth) {
+    LunarEph.featureAtAzimuth = function (lat, lon, azDeg) {
+      // DEMO STUB: name the feature whose bearing from the site is nearest,
+      // within 25° of bearing and 200 km, from the stub catalogue above.
+      var DEG = Math.PI / 180;
+      var best = null;
+      var feats = window.LUNAR_FEATURES.features;
+      for (var i = 0; i < feats.length; i++) {
+        var f = feats[i];
+        var dLat = (f.lat - lat) * DEG;
+        var dLon = (f.lon - lon) * DEG * Math.cos(lat * DEG);
+        var distKm = Math.hypot(dLat, dLon) * 1737.4;
+        if (distKm > 200 || distKm < 5) continue;
+        var bearing = (Math.atan2(dLon, dLat) / DEG + 360) % 360;
+        var sep = Math.abs(((bearing - azDeg + 540) % 360) - 180);
+        if (sep > 25) continue;
+        if (!best || distKm < best.distanceKm) {
+          best = { name: f.name, distanceKm: distKm, elevationDeg: null };
+        }
+      }
+      return best;
+    };
+    LunarEph.featureAtAzimuth.DEMO_STUB = true;
+  }
+
+  /* ---- demo data ---- */
+
+  var terrain = (window.LUNAR_TERRAIN && LUNAR_TERRAIN.sites) || {};
   var defs = [
-    { id: "mouton", name: "Mons Mouton", short: "Mouton", lat: -85.416, lon: 31.851, color: "#f4efe4" },
-    { id: "apollo11", name: "Apollo 11", short: "Apollo 11", lat: 0.67408, lon: 23.47297, color: "#ef8f62" }
+    { id: "mouton", name: "Mons Mouton", short: "Mouton", lat: -85.416, lon: 31.851, color: "#f4efe4",
+      terrain: terrain.mouton || null },
+    { id: "apollo11", name: "Apollo 11", short: "Apollo 11", lat: 0.67408, lon: 23.47297, color: "#ef8f62",
+      terrain: null }
   ];
   defs.forEach(function (d) {
     d.samples = LunarEph.sampleMission(new Date(START), LUNAR_DAY_MS, d.lat, d.lon, { stepMs: STEP, maskDeg: MASK, panel: PANEL });
     d.now = LunarEph.evaluate(new Date(START), d.lat, d.lon, MASK, PANEL);
+    demoSamples[d.lat.toFixed(3) + "," + d.lon.toFixed(3)] = d.samples;
   });
 
   var horizonCanvas = document.getElementById("horizon");
   var chartCanvas = document.getElementById("chart");
   var mapCanvas = document.getElementById("map");
+  var globeCanvas = document.getElementById("globe");
   var scrub = document.getElementById("scrub");
   var whenEl = document.getElementById("when");
   var hitEl = document.getElementById("hit");
@@ -105,13 +222,13 @@
       playheadMs: state.playheadMs,
       landingMs: START,
       maskDeg: MASK,
+      maskProfile: d.terrain ? d.terrain.profile : null,
       mapMode: "auto"
     };
   }
 
-  // The map always gets both sites. In polar mode the mixed pair forces the
-  // stereographic span to grow past the 15° cap until Apollo 11 fits; viz.js
-  // computes that span from the site latitudes.
+  // The map always gets both sites; in polar mode the span grows past the 15°
+  // cap until Apollo 11 fits — viz.js computes that span from the latitudes.
   function mapModel() {
     return {
       sites: defs,
@@ -123,13 +240,25 @@
     };
   }
 
+  function globeModel() {
+    var d = defs[state.which];
+    return {
+      catalogue: (window.LUNAR_SITES || []).slice(0, 40),
+      selectedIds: [d.id],
+      primaryId: d.id,
+      now: d.now
+    };
+  }
+
   function redrawAll() {
     var d = defs[state.which];
     d.now = LunarEph.evaluate(new Date(state.playheadMs), d.lat, d.lon, MASK, PANEL);
     LunarViz.drawHorizon(horizonCanvas, siteModel());
     LunarViz.drawChart(chartCanvas, siteModel());
     LunarViz.drawMap(mapCanvas, mapModel());
-    whenEl.textContent = new Date(state.playheadMs).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+    LunarGlobe.drawGlobe(globeCanvas, globeModel());
+    whenEl.textContent = new Date(state.playheadMs).toISOString().slice(0, 16).replace("T", " ") + " UTC"
+      + (LunarEph.horizonEvents.DEMO_STUB ? " · events: demo stub" : "");
   }
 
   function pick(which) {
@@ -147,13 +276,27 @@
   });
   modeSel.addEventListener("change", redrawAll);
 
-  mapCanvas.addEventListener("click", function (ev) {
-    var rect = mapCanvas.getBoundingClientRect();
-    var id = LunarViz.hitMap(mapCanvas, mapModel(), ev.clientX - rect.left, ev.clientY - rect.top);
-    console.log("hitMap:", id);
-    hitEl.textContent = id ? "hit: " + id : "hit: (nothing)";
+  LunarViz.attachMap(mapCanvas, {
+    model: mapModel,
+    onChange: function () { LunarViz.drawMap(mapCanvas, mapModel()); },
+    onPick: function (id) {
+      console.log("map pick:", id);
+      hitEl.textContent = "hit: " + id;
+      var idx = id === "apollo11" ? 1 : id === "mouton" ? 0 : -1;
+      if (idx >= 0) pick(idx);
+    }
   });
 
+  LunarGlobe.attach(globeCanvas, {
+    model: globeModel,
+    onChange: function () { LunarGlobe.drawGlobe(globeCanvas, globeModel()); },
+    onPick: function (hit) {
+      console.log("globe pick:", hit);
+      hitEl.textContent = "globe: " + (hit.id || ("cluster of " + hit.cluster.length));
+    }
+  });
+
+  window.addEventListener("lunar-basemap-ready", redrawAll);
   window.addEventListener("resize", redrawAll);
   redrawAll();
 })();
