@@ -208,6 +208,98 @@
     return out;
   }
 
+  /* ---------- optional photographic basemap ---------- */
+
+  /* window.LUNAR_BASEMAP (basemap.js) is an equirectangular mosaic as a
+     data: URI — same-origin by definition, so sampling it cannot taint the
+     canvas, which matters because this file lives on getImageData. When the
+     script is absent the globe keeps its schematic shading. */
+  var TEX_N = 224;
+  var tex = { img: null, data: null, tried: false, buf: null, key: null };
+
+  function texSource() {
+    var def = root.LUNAR_BASEMAP;
+    if (!def || !def.src) return null;
+    if (!tex.tried) {
+      tex.tried = true;
+      var img = new Image();
+      img.onload = function () {
+        tex.img = img;
+        try { root.dispatchEvent(new Event("lunar-basemap-ready")); } catch (e) { /* next redraw */ }
+      };
+      img.src = def.src;
+    }
+    if (!tex.img) return null;
+    if (!tex.data) {
+      var cv = root.document.createElement("canvas");
+      cv.width = tex.img.naturalWidth;
+      cv.height = tex.img.naturalHeight;
+      var cx = cv.getContext("2d");
+      cx.drawImage(tex.img, 0, 0);
+      tex.data = { px: cx.getImageData(0, 0, cv.width, cv.height), w: cv.width, h: cv.height };
+    }
+    return tex.data;
+  }
+
+  /* Orthographic render of the mosaic for the current camera, into a small
+     cached buffer — same approach and cost as the lighting pass. */
+  function textureLayer(ctx, f) {
+    var src = texSource();
+    if (!src) return false;
+    var key = f.lat.toFixed(1) + "|" + f.lon.toFixed(1);
+    if (!tex.buf) {
+      tex.buf = root.document.createElement("canvas");
+      tex.buf.width = TEX_N;
+      tex.buf.height = TEX_N;
+    }
+    if (tex.key !== key) {
+      var bctx = tex.buf.getContext("2d");
+      var out = bctx.createImageData(TEX_N, TEX_N);
+      var d = src.px.data;
+      var half = TEX_N / 2;
+      var la = f.lat * DEG;
+      var lo = f.lon * DEG;
+      var sinLa = Math.sin(la);
+      var cosLa = Math.cos(la);
+      var sinLo = Math.sin(lo);
+      var cosLo = Math.cos(lo);
+      for (var py = 0; py < TEX_N; py++) {
+        var ny = (half - py - 0.5) / half;
+        for (var px = 0; px < TEX_N; px++) {
+          var nx = (px + 0.5 - half) / half;
+          var rr = nx * nx + ny * ny;
+          var o = (py * TEX_N + px) * 4;
+          if (rr > 1) { out.data[o + 3] = 0; continue; }
+          var nz = Math.sqrt(1 - rr);
+          // inverse of toView(): view (nx, ny, nz) back to body lat/lon
+          var x1 = nz * cosLa - ny * sinLa;
+          var vz = ny * cosLa + nz * sinLa;
+          var vx = x1 * cosLo - nx * sinLo;
+          var vy = x1 * sinLo + nx * cosLo;
+          var lonD = Math.atan2(vy, vx) / DEG;
+          var latD = Math.asin(Math.max(-1, Math.min(1, vz))) / DEG;
+          var sx = Math.min(src.w - 1, Math.max(0, Math.round(((lonD + 180) / 360) * src.w)));
+          var sy = Math.min(src.h - 1, Math.max(0, Math.round(((90 - latD) / 180) * src.h)));
+          var so = (sy * src.w + sx) * 4;
+          out.data[o] = d[so];
+          out.data[o + 1] = d[so + 1];
+          out.data[o + 2] = d[so + 2];
+          out.data[o + 3] = 255;
+        }
+      }
+      bctx.putImageData(out, 0, 0);
+      tex.key = key;
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(f.cx, f.cy, f.R, 0, 2 * Math.PI);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(tex.buf, f.cx - f.R, f.cy - f.R, f.R * 2, f.R * 2);
+    ctx.restore();
+    return true;
+  }
+
   /* ---------- drawing ---------- */
 
   function albedo(ctx, f) {
@@ -422,8 +514,10 @@
     ctx.arc(f.cx, f.cy, f.R * 1.3, 0, 2 * Math.PI);
     ctx.fill();
 
-    albedo(ctx, f);
-    surface(ctx, f);
+    if (!textureLayer(ctx, f)) {
+      albedo(ctx, f);
+      surface(ctx, f);
+    }
     lighting(ctx, f, sun);
     graticule(ctx, f);
 
@@ -491,6 +585,32 @@
         color: L.strong ? C.ink : C.muted,
         halo: "rgba(12, 11, 9, 0.88)"
       });
+    }
+
+    // IAU feature names from features.js, once the camera is close enough that
+    // they land on distinct pixels. Largest first, collision-avoided, capped.
+    var cat = root.LUNAR_FEATURES;
+    if (cat && cat.features && cat.features.length && f.zoom > 1.25) {
+      var sorted = cat.features.slice().sort(function (a, b) { return (b.diamKm || 0) - (a.diamKm || 0); });
+      var shown = 0;
+      for (var q = 0; q < sorted.length && shown < 10; q++) {
+        var ft = sorted[q];
+        var diamPx = Math.sin(((ft.diamKm || 0) / 2) / MOON_KM) * f.R * 2;
+        if (diamPx < 46 / f.zoom) continue;
+        var fp = project(ft.lat, ft.lon, f);
+        if (!fp.front || fp.z < 0.25) continue;
+        var clash = false;
+        for (var r = 0; r < labels.length; r++) {
+          if (Math.abs(labels[r].x - fp.x) < 80 && Math.abs(labels[r].y - fp.y) < 13) clash = true;
+        }
+        if (clash) continue;
+        labels.push({ x: fp.x, y: fp.y, strong: false });
+        text(ctx, ft.name, fp.x, fp.y, {
+          size: 9.5, color: C.faint, align: "center",
+          halo: "rgba(12, 11, 9, 0.8)"
+        });
+        shown++;
+      }
     }
 
     // Sun direction arrow at the edge, pointing where the light comes from.
