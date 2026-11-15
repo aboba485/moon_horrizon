@@ -58,6 +58,10 @@ for(const [date,coords,sep,re,rs] of [
  assert.ok(Math.abs(((v.sun.az-v.earth.az+540)%360)-180)<2);
 }
 assert.equal(E.eclipseAt('2026-11-14',...mouton).kind,'none');
+const north = E.findEclipses('2026-08-27',3*DAY,80,0)[0];
+assert.equal(north.kind,'partial');assert.ok(north.maxObscuration>.95&&north.maxObscuration<.97);
+assert.equal(E.eclipseAt('2026-08-28T04:12:49Z',...mouton).kind,'total');
+for (const dt of [-60000,60000]) assert.ok(north.maxObscuration>=E.eclipseAt(new Date(north.peakMs+dt),80,0).obscuration);
 let global=A.SearchLunarEclipse(new Date('2026-01-01'));
 assert.equal(global.kind,'total');assert.equal(global.obscuration,1);
 global=A.NextLunarEclipse(global.peak);assert.equal(global.kind,'partial');close(global.obscuration,.966,.002);

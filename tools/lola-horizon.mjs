@@ -114,7 +114,7 @@ const STEPS = raySteps();
 
 /* The horizon profile at one site, degrees per azimuth bin.
    Azimuth is clockwise from north, matching the rest of the project. */
-function profileFor(lat, lon) {
+export function profileFor(lat, lon) {
   const p0 = unit(lat, lon);
   const h0 = heightAt(p0);
   if (Number.isNaN(h0)) return null;
@@ -132,6 +132,7 @@ function profileFor(lat, lon) {
   const floor = h0 > 0 ? -Math.acos(R / r0) / DEG : 0;
 
   const profile = new Float64Array(BINS).fill(-Infinity);
+  const witnesses = new Array(BINS).fill(null);
   const far = new Float64Array(BINS); // metres to whatever sets the horizon
   const rays = BINS * SUBRAYS;
 
@@ -169,6 +170,12 @@ function profileFor(lat, lon) {
     if (el > profile[bin]) {
       profile[bin] = el;
       far[bin] = bestS;
+      const d = bestS / R;
+      const ux = p0.x * Math.cos(d) + dx * Math.sin(d);
+      const uy = p0.y * Math.cos(d) + dy * Math.sin(d);
+      const uz = p0.z * Math.cos(d) + dz * Math.sin(d);
+      witnesses[bin] = { lat: Math.asin(uz) / DEG, lon: Math.atan2(uy, ux) / DEG,
+        distanceKm: bestS / 1000, elevationDeg: el };
     }
   }
 
@@ -179,6 +186,7 @@ function profileFor(lat, lon) {
   let reach = 0;
   for (let b = 0; b < BINS; b++) {
     const v = Math.max(profile[b] === -Infinity ? floor : profile[b], floor);
+    if (profile[b] < floor) witnesses[b] = null;
     const r = Math.round(v * 100) / 100;
     out.push(r);
     min = Math.min(min, r);
@@ -193,10 +201,12 @@ function profileFor(lat, lon) {
     max,
     mean: Math.round((sum / BINS) * 100) / 100,
     reachKm: Math.round(reach / 100) / 10,
-    profile: out
+    profile: out,
+    witnesses
   };
 }
 
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 const started = Date.now();
 const result = {};
 const rows = [];
@@ -267,3 +277,5 @@ fs.writeFileSync(OUT, lines.join("\n"));
 console.log(rows.join("\n"));
 console.log("");
 console.log(ids.length + " sites, " + (Date.now() - started) + " ms, " + (fs.statSync(OUT).size / 1024).toFixed(1) + " kB written to terrain.js");
+
+}

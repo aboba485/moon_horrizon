@@ -162,3 +162,33 @@ ok eclipses: four site fixtures, circle-overlap area, vendor global sequence, co
 ```
 
 Both original gate tests are rerun unchanged; their 2026-11-14 angular fixtures and Mons Mouton November energy remain unchanged. March 3 at 11:33:40 UTC, Mons Mouton now reports separation 0.617635°, Earth radius 0.955481°, Sun radius 0.268095°, obscuration 1 and residual power ~0.000412 W/m², versus the former ~412.4 W/m². At August 28 04:12:49 UTC the same site has separation 0.219900° and total local coverage even though the Earth-centric lunar eclipse is partial (vendor obscuration ~0.966). Four topocentric fixtures and an independent numerical area integration test the overlap model.
+
+### Named surface features and skyline witnesses
+
+Load **`features.js` as a classic script before `app.js`** (Session C owns the script tag). It sets `window.LUNAR_FEATURES = {meta,features,skylines}` and supports CommonJS for tests. The engine resolves the global lazily; in a browser without the feature script, `featureAtAzimuth` returns null. No `fetch`, modules, or raw DEM are needed in the browser.
+
+The official [IAU/USGS Gazetteer GIS download](https://planetarynames.wr.usgs.gov/GIS_Downloads) supplies the [Moon KMZ](https://asc-planetarynames-data.s3.us-west-2.amazonaws.com/MOON_nomenclature_center_pts.kmz). The source describes planetocentric latitude, east-positive longitude and the LOLA 2011 lunar control network. `meta.source`, `download`, and `sourceSha256` record provenance. Filter: adopted IAU features with diameter >=150 km anywhere, plus **all** adopted features south of 75°S, including satellite craters. The result is 290 `{name,kind,lat,lon,diamKm,id}` records; coordinates are copied from the source, longitude normalized to −180..180. The feature centre of Mons Mouton is deliberately different from the mission's representative landing coordinate. Gazetteer diameter is a footprint approximation, not a terrain height or a mapped geological boundary.
+
+Reproduce offline artifacts from the repository root:
+
+```sh
+python3 tools/fetch-features.py       # download official KMZ to ignored data/nomenclature/
+sh tools/fetch-lola.sh               # download the 120 m polar DEM to ignored data/lola/
+node tools/build-features.mjs        # writes only features.js, never terrain.js
+```
+
+`python3 tools/fetch-features.py --input /path/to/MOON_nomenclature_center_pts.kmz` reuses an existing source archive. No external Python or Node packages are required. Downloads and intermediate JSON stay in ignored `data/`; only the classic-script artifact is committed. The generated artifact is **61,934 bytes**, below the hard 100 kB size guard.
+
+`tools/lola-horizon.mjs` now exports `profileFor` and records the actual DEM maximum's location on every ray. It retains the original 3 subrays per 1° bin, 60/120/300 m radial steps, 100 km reach, projection and skyline formula. Importing it no longer regenerates terrain.js; invoking it directly retains its original behaviour. The feature builder uses those same witnesses and selects the nearest Gazetteer centre only when it lies within **min(30 km, diameter/2 + 2 km)** of that DEM maximum. Otherwise it leaves the direction unnamed. An assumed datum-sphere floor has no physical terrain witness and is also unnamed. This is approximate **nearest named feature at the skyline maximum**, not a survey proving which named geological boundary made a ridge. Small named features near an unnamed ridge can still produce ambiguous labels; inspect the source data for operational use.
+
+`featureAtAzimuth(lat,lon,azDeg,{maskDeg})` returns `{name,distanceKm,elevationDeg}` or null. `distanceKm` is from the observer to the terrain point that set the skyline, **not** the distance to the feature centre. `elevationDeg` is the measured witness elevation, with the user's numeric offset or `maskDeg.offsetDeg` added. Invoke it when displaying the real skyline; a uniform-mask-only view has no named obstruction and should omit terrain labels. Attribution uses the nearest 1° provenance bin, which retains the winning subray, rather than interpolating names. Azimuth wraps through 0/360. Runtime lookup requires the exact catalogue coordinates (within 1e-6 degrees); it never assigns a nearby catalogue site's terrain to custom coordinates. Features outside the mapped site skylines, unnamed directions, missing data, or non-finite coordinates return null.
+
+`skylines` is an additional internal compact index: each site has `{id,lat,lon,bins}`; `bins` contains 360 semicolon-delimited rows, with nonempty rows holding base-36 feature index, observer distance in decikilometres, and elevation in centidegrees. Consumers should use `featureAtAzimuth`, not decode this implementation detail. The public `features` array remains ordinary records for labels.
+
+`node test/features.test.mjs` (2026-11-15):
+
+```text
+ok features: 290 IAU features, 17 LOLA skylines, 3512 named / 2608 unnamed bearings, <100 kB, classic-script globals
+```
+
+The test executes vendor + feature + engine scripts in a browser-like context without CommonJS or network, checks published records and coordinate bounds, all 6,120 provenance bins, unknown/custom sites, unnamed bearings, azimuth wrapping and offset handling. It does not assert that a name proximity heuristic is a geological boundary. Raw DEM input is not needed to run these tests.

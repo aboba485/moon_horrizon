@@ -709,11 +709,17 @@
       const lo = centre - 12 * 3600000, hi = centre + 12 * 3600000;
       const clearance = (t) => { const e = eclipseAt(new Date(t), lat, lon);
         return e.sepDeg - e.earthRadiusDeg - e.sunRadiusDeg; };
-      const peakMs = Math.round(minimumTime(lo, hi, clearance));
+      let peakMs = Math.round(minimumTime(lo, hi, clearance));
       if (clearance(peakMs) < 0) {
         const startMs = Math.round(bisectTime(lo, peakMs, clearance));
         const endMs = Math.round(bisectTime(peakMs, hi, clearance));
         if (endMs > a && startMs < b) {
+          // In a partial event, maximum disk AREA overlap need not occur at
+          // minimum external clearance because the angular radii also change.
+          if (eclipseAt(new Date(peakMs), lat, lon).obscuration < 1) {
+            peakMs = Math.round(minimumTime(startMs, endMs,
+              (t) => -eclipseAt(new Date(t), lat, lon).obscuration));
+          }
           const peak = eclipseAt(new Date(peakMs), lat, lon);
           events.push({ startMs, peakMs, endMs, maxObscuration: peak.obscuration, kind: peak.kind });
         }
@@ -721,6 +727,27 @@
       candidate = Astronomy.NextLunarEclipse(candidate.peak);
     }
     return events;
+  }
+
+  // Witnesses were traced offline through the same LOLA DEM as terrain.js.
+  // Runtime lookup never substitutes a nearby site's skyline for custom coordinates.
+  function featureAtAzimuth(lat, lon, azDeg, opts) {
+    if (![lat, lon, azDeg].every(Number.isFinite)) return null;
+    const catalogue = root.LUNAR_FEATURES || (typeof require === "function" ? require("./features.js") : null);
+    if (!catalogue || !catalogue.skylines) return null;
+    const skyline = catalogue.skylines.find((s) => Math.abs(s.lat - lat) < 1e-6 &&
+      Math.abs(wrappedAngle(s.lon - lon)) < 1e-6);
+    if (!skyline) return null;
+    const rows = skyline.bins.split(";");
+    const az = ((azDeg % 360) + 360) % 360;
+    const row = rows[Math.round(az / 360 * rows.length) % rows.length];
+    if (!row) return null;
+    const [index, deciKm, centiDeg] = row.split(",").map((v) => parseInt(v, 36));
+    const feature = catalogue.features[index];
+    if (!feature || !Number.isFinite(deciKm) || !Number.isFinite(centiDeg)) return null;
+    const mask = opts && opts.maskDeg;
+    const offset = mask && typeof mask === "object" ? Number(mask.offsetDeg) || 0 : Number(mask) || 0;
+    return { name: feature.name, distanceKm: deciKm / 10, elevationDeg: centiDeg / 100 + offset };
   }
 
   function nextCrossing(start, lat, lon, maskDeg, which, wantRise) {
@@ -828,6 +855,7 @@
     DSN,
     ECLIPSE_POWER_FLOOR,
     horizonEvents, nextEvent, solveFor, eclipseAt, findEclipses,
+    featureAtAzimuth,
     MOON_RADIUS_KM,
     observe,
     siteView,
