@@ -127,5 +127,5 @@ Say the Shackleton number. 100% on a map, 48% against the real rim. Everything e
 - **The four buttons are also links.** `index.html#st=rim`, `#st=margin`, `#st=silence`, `#st=eclipse`. If a click misses, use the URL.
 - **Next eclipse is usually disabled, and that is correct.** Eclipses come about twice a year, so most missions contain none. The tooltip says why. It lights up on the eclipse finding.
 - **Clicking any site by hand clears the active finding.** That is intended; the reading would otherwise describe a site that is no longer selected.
-- **Play is safe to leave running.** Clicking a finding stops it and returns the playhead to the landing epoch, so the reading is never for a moved playhead.
+- **Play lives in the timeline bar under the controls,** next to the slider, the ±1 h / ±1 d steps, and the current UTC readout. It is safe to leave running: clicking a finding stops it and returns the playhead to the landing epoch, so the reading is never for a moved playhead.
 - **Expert mode needs width.** Below about 860 px the console stacks into one column and the aside drops under the stage. It is only CSS, so widening the window fixes it immediately.

@@ -9,28 +9,28 @@
   body {
     margin: 0;
     padding: 24px;
-    background: #0c0b09;
-    color: #f4efe6;
+    background: #081426;
+    color: #f5f8ff;
     font-family: "Outfit", "Segoe UI", sans-serif;
     font-size: 14px;
   }
   h1 { font-size: 20px; font-weight: 560; margin: 0 0 4px; }
-  p.sub { color: #a79d90; margin: 0 0 18px; max-width: 72em; }
+  p.sub { color: #acbcd3; margin: 0 0 18px; max-width: 72em; }
   .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
   .col { flex: 1 1 560px; min-width: 420px; }
-  canvas { display: block; width: 100%; border: 1px solid rgba(243,232,214,0.12); border-radius: 8px; }
+  canvas { display: block; width: 100%; border: 1px solid #29415f; border-radius: 8px; }
   #horizon { height: 380px; }
   #chart { height: 240px; margin-top: 14px; }
   #map { width: 440px; height: 440px; flex: 0 0 auto; touch-action: none; }
   #globe { width: 440px; height: 400px; margin-top: 14px; touch-action: none; }
   .controls { display: flex; gap: 10px; align-items: center; margin: 14px 0; flex-wrap: wrap; }
   button, select {
-    background: #221f1a; color: #f4efe6; border: 1px solid rgba(243,232,214,0.28);
+    background: #172d4d; color: #f5f8ff; border: 1px solid #29415f;
     border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer;
   }
-  button.on { border-color: #f0a202; color: #ffd27a; }
-  input[type=range] { flex: 1 1 240px; }
-  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; color: #a79d90; }
+  button.on { border-color: #76a9ff; color: #a8c7ff; }
+  input[type=range] { flex: 1 1 240px; accent-color: #76a9ff; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; color: #acbcd3; }
   #hit { min-height: 1.2em; }
 </style>
 </head>
@@ -191,9 +191,9 @@
 
   var terrain = (window.LUNAR_TERRAIN && LUNAR_TERRAIN.sites) || {};
   var defs = [
-    { id: "mouton", name: "Mons Mouton", short: "Mouton", lat: -85.416, lon: 31.851, color: "#f4efe4",
+    { id: "mouton", name: "Mons Mouton", short: "Mouton", lat: -85.416, lon: 31.851, color: "#f5f8ff",
       terrain: terrain.mouton || null },
-    { id: "apollo11", name: "Apollo 11", short: "Apollo 11", lat: 0.67408, lon: 23.47297, color: "#ef8f62",
+    { id: "apollo11", name: "Apollo 11", short: "Apollo 11", lat: 0.67408, lon: 23.47297, color: "#ff9e7a",
       terrain: null }
   ];
   defs.forEach(function (d) {

@@ -17,19 +17,24 @@
   var SANS = '"Outfit", sans-serif';
   var MONO = '"IBM Plex Mono", ui-monospace, monospace';
 
+  /* Mirrors styles.css and viz.js: dark-blue page, white ink, amber Sun, cyan
+     Earth, blue interaction accent. The lunar surface itself stays neutral grey
+     so the photographic basemap and the schematic fallback agree. */
   var C = {
-    space: "#0c0b09",
-    limb: "rgba(243, 232, 214, 0.22)",
-    grid: "rgba(243, 232, 214, 0.10)",
-    gridWarm: "rgba(240, 162, 2, 0.16)",
-    ink: "#f4efe6",
-    muted: "#a79d90",
-    faint: "#6f675c",
-    sun: "#f0a202",
-    earth: "#3db7e8",
-    highland: "#a89e8e",
-    mare: "#3f3c35",
-    night: "#0e0d0b"
+    space: "#081426",
+    limb: "rgba(172, 188, 211, 0.25)",
+    grid: "rgba(172, 188, 211, 0.10)",
+    gridWarm: "rgba(118, 169, 255, 0.22)",
+    ink: "#f5f8ff",
+    muted: "#acbcd3",
+    faint: "#7a8ca6",
+    accent: "#76a9ff",
+    sun: "#ffc24d",
+    earth: "#45c8e8",
+    highland: "#a3a9b4",
+    mare: "#3a3f49",
+    night: "#0a1322",
+    halo: "rgba(6, 14, 28, 0.88)"
   };
 
   /* Major maria and a few bright craters, by published centre and diameter.
@@ -419,7 +424,7 @@
       featurePatch(ctx, f, FEATURES[i], C.mare, 0.66 * FEATURES[i].tone);
     }
     for (i = 0; i < BRIGHT.length; i++) {
-      featurePatch(ctx, f, BRIGHT[i], "#ebe4d4", 0.5);
+      featurePatch(ctx, f, BRIGHT[i], "#e4e9f2", 0.5);
     }
     ctx.restore();
   }
@@ -462,17 +467,17 @@
           // shadow; the low exponent keeps the daylit face readable as a map
           // while still rounding off toward the terminator.
           var a = (1 - Math.pow(illum, 0.32)) * 0.58;
-          data[o] = 10;
-          data[o + 1] = 9;
-          data[o + 2] = 7;
+          data[o] = 5;
+          data[o + 1] = 10;
+          data[o + 2] = 20;
           data[o + 3] = Math.round(Math.min(255, a * 255));
         } else {
           // Night side. Deliberately not opaque: a solid disk would hide every
           // pin past the terminator, and the point of the globe is picking one.
           var d = 0.70 + Math.min(0.14, -illum * 0.7);
-          data[o] = 8;
-          data[o + 1] = 7;
-          data[o + 2] = 6;
+          data[o] = 4;
+          data[o + 1] = 9;
+          data[o + 2] = 18;
           data[o + 3] = Math.round(d * 255);
         }
       }
@@ -492,8 +497,8 @@
       var gx = f.cx + (lit.x / lm) * f.R * 0.5;
       var gy = f.cy - (lit.y / lm) * f.R * 0.5;
       var g = ctx.createRadialGradient(gx, gy, 0, gx, gy, f.R * 0.95);
-      g.addColorStop(0, "rgba(255, 236, 196, 0.18)");
-      g.addColorStop(1, "rgba(255, 236, 196, 0)");
+      g.addColorStop(0, "rgba(255, 226, 170, 0.15)");
+      g.addColorStop(1, "rgba(255, 226, 170, 0)");
       ctx.fillStyle = g;
       ctx.fillRect(f.cx - f.R, f.cy - f.R, f.R * 2, f.R * 2);
     }
@@ -548,17 +553,17 @@
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(p.x, p.y - 15, r, 0, 2 * Math.PI);
-      ctx.fillStyle = opts.color || C.sun;
+      ctx.fillStyle = opts.color || C.accent;
       ctx.fill();
-      ctx.strokeStyle = "rgba(12, 11, 9, 0.9)";
-      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 1.6;
       ctx.stroke();
     } else {
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
       ctx.fillStyle = opts.color || (opts.selected ? C.ink : C.muted);
       ctx.fill();
-      ctx.strokeStyle = "rgba(12, 11, 9, 0.85)";
+      ctx.strokeStyle = C.halo;
       ctx.lineWidth = 1.2;
       ctx.stroke();
     }
@@ -583,8 +588,8 @@
 
     // Soft glow so the disk does not sit flat on the background.
     var halo = ctx.createRadialGradient(f.cx, f.cy, f.R * 0.95, f.cx, f.cy, f.R * 1.3);
-    halo.addColorStop(0, "rgba(240, 162, 2, 0.10)");
-    halo.addColorStop(1, "rgba(240, 162, 2, 0)");
+    halo.addColorStop(0, "rgba(118, 169, 255, 0.08)");
+    halo.addColorStop(1, "rgba(118, 169, 255, 0)");
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(f.cx, f.cy, f.R * 1.3, 0, 2 * Math.PI);
@@ -616,11 +621,11 @@
         ctx.stroke();
         ctx.beginPath();
         ctx.arc(pe.x, pe.y, 9, 0, 2 * Math.PI);
-        ctx.strokeStyle = "rgba(61, 183, 232, 0.35)";
+        ctx.strokeStyle = "rgba(69, 200, 232, 0.35)";
         ctx.lineWidth = 1;
         ctx.stroke();
         text(ctx, "Earth overhead", pe.x + 12, pe.y + 4, {
-          size: 10, color: C.earth, halo: "rgba(12, 11, 9, 0.85)"
+          size: 10, color: C.earth, halo: C.halo
         });
         ctx.restore();
       }
@@ -637,7 +642,7 @@
       marker(ctx, pin.p, {
         primary: isPrimary,
         selected: isSel,
-        color: isPrimary ? C.sun : isSel ? C.ink : pin.cluster ? C.sun : C.muted
+        color: isPrimary ? C.accent : isSel ? C.ink : pin.cluster ? C.accent : C.muted
       });
       if (pin.p.front && (isPrimary || isSel || pin.cluster || f.zoom > 1.4)) {
         labels.push({
@@ -659,7 +664,7 @@
         size: L.strong ? 12 : 10.5,
         weight: L.strong ? "500" : "",
         color: L.strong ? C.ink : C.muted,
-        halo: "rgba(12, 11, 9, 0.88)"
+        halo: C.halo
       });
     }
 
@@ -683,7 +688,7 @@
         labels.push({ x: fp.x, y: fp.y, strong: false });
         text(ctx, ft.name, fp.x, fp.y, {
           size: 9.5, color: C.faint, align: "center",
-          halo: "rgba(12, 11, 9, 0.8)"
+          halo: C.halo
         });
         shown++;
       }
@@ -697,12 +702,13 @@
       var ay = f.cy - (ls.y / lm) * (f.R + 20);
       text(ctx, "\u2600 Sun", ax, ay, {
         size: 10, color: C.sun, align: "center", baseline: "middle",
-        halo: "rgba(12, 11, 9, 0.9)"
+        halo: C.halo
       });
     }
 
-    text(ctx, "Drag to spin \u00b7 scroll to zoom \u00b7 click a pin",
-      f.cx, s.h - 8, { size: 10, color: C.faint, align: "center" });
+    /* The how-to hint lives in the page chrome (index.html .globe-hint), where
+       it can be styled and hidden from screen readers; the canvas keeps only
+       the camera readout. */
     text(ctx, "view " + f.lat.toFixed(0) + "\u00b0, " + f.lon.toFixed(0) + "\u00b0",
       8, s.h - 8, { size: 9.5, color: C.faint, mono: true });
   }

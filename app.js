@@ -6,7 +6,10 @@
 
   var HOUR = 3600000;
   var DAY = 86400000;
-  var COLORS = ["#f4efe4", "#ef8f62", "#7dcea0"];
+  /* Comparison-site colors, matched to the styles.css palette: white for the
+     primary, coral and green for the pins. Distinct in hue AND brightness, and
+     the chart separates them further by line style. */
+  var COLORS = ["#f5f8ff", "#ff9e7a", "#7fd8a4"];
   var MAX_SITES = 3;
   var STORE_KEY = "lunar-horizon-custom-sites";
   var PLAY_SPAN_MS = 24000;
@@ -105,6 +108,27 @@
     return Math.cos(site.lat * d) * Math.cos(site.lon * d) <= 0;
   }
 
+  /* ---------- term tooltips ----------
+
+     The interface leans on jargon a student has not met. Each term renders as a
+     dotted-underline button whose tooltip opens on hover, focus, click, and
+     touch, and closes on Escape — so it works without a mouse. */
+
+  var TERMS = {
+    dte: "Direct to Earth: a geometric line of sight from the site to a Deep Space Network station (Goldstone, Madrid, or Canberra). Not a schedule and not a link budget — just whether the radio path exists.",
+    libration: "Libration: the slow apparent wobble of the Moon, about ±8°. It is why Earth is not fixed in the lunar sky, and why some far-side-leaning sites still see Earth part of the month.",
+    mask: "The horizon mask is the elevation angle the skyline blocks, per direction. With the LOLA skyline on it is a measured profile; with it off it is one uniform angle you set.",
+    power: "Electrical watts per square metre of solar cells: sunlight scaled by distance, panel angle, cell efficiency, and any eclipse.",
+    energy: "Watt-hours per square metre integrated over the whole window — what a battery and an array actually trade on.",
+    joint: "Sunlit and in direct contact with Earth at the same time: the hours when the lander can both make power and talk home."
+  };
+
+  function term(key, label) {
+    var tip = TERMS[key];
+    if (!tip) return esc(label);
+    return '<button type="button" class="term" data-tip="' + esc(tip) + '">' + esc(label) + "</button>";
+  }
+
   /* ---------- custom sites ---------- */
 
   function loadCustom() {
@@ -200,9 +224,15 @@
     search: "",
     playing: false,
     scanning: false,
+    solving: false,
     windows: [],
     slipDays: 14,
-    solve: null
+    solve: null,
+    /* Simple mode's "Compare with another site": when armed, the next pick on
+       the globe ADDS the site to the comparison instead of replacing it.
+       Ephemeral by design — it is a gesture, not a scenario, so it does not
+       ride the URL hash. */
+    compareArm: false
   };
 
   function allSites() {
@@ -523,18 +553,25 @@
   }
 
   function renderChips() {
-    el("chips").innerHTML = state.selected.map(function (id, index) {
+    var chips = state.selected.map(function (id, index) {
       var site = siteById(id);
       if (!site) return "";
       var color = COLORS[index % COLORS.length];
       return '<span class="chip-group">' +
-        '<button type="button" class="chip' + (index === 0 ? " primary" : "") + '" data-chip="' + esc(id) + '">' +
+        '<button type="button" class="chip' + (index === 0 ? " primary" : "") + '" data-chip="' + esc(id) + '"' +
+        ' title="' + (index === 0 ? "Primary site" : "Make this the primary site") + '">' +
         '<i class="swatch" style="background:' + color + '"></i>' + esc(site.short || site.name) + "</button>" +
         (state.selected.length > 1
-          ? '<button type="button" class="chip-x" data-drop="' + esc(id) + '" aria-label="Remove ' + esc(site.name) + '">\u00d7</button>'
+          ? '<button type="button" class="chip-x" data-drop="' + esc(id) + '" aria-label="Remove ' + esc(site.name) + ' from the comparison">\u00d7</button>'
           : "") +
         "</span>";
     }).join("");
+    /* The three-site cap is a rule the user runs into, so it is written next to
+       the control it limits rather than discovered by a button doing nothing. */
+    var hint = state.selected.length >= MAX_SITES
+      ? '<span class="chips-hint">3 of 3 \u2014 remove one to add another</span>'
+      : '<span class="chips-hint">' + state.selected.length + " of 3 \u00b7 pin sites to compare</span>";
+    el("chips").innerHTML = chips + hint;
   }
 
   function renderSiteNote() {
@@ -653,11 +690,11 @@
     el("metrics").innerHTML =
       card("sun", "Sunlight", pct(s.sunlitFrac),
         hours(s.sunlitHours) + " lit \u00b7 longest night " + msHours(s.longestNight.ms)) +
-      card("earth", "Direct to Earth", pct(s.dteFrac),
+      card("earth", term("dte", "Direct to Earth"), pct(s.dteFrac),
         hours(s.dteHours) + " in view \u00b7 longest gap " + msHours(s.longestBlackout.ms)) +
-      card("joint", "Sun and link together", pct(s.jointFrac),
+      card("joint", term("joint", "Sun and link together"), pct(s.jointFrac),
         hours(s.jointHours) + " of overlap \u00b7 Earth disk " + pct(s.earthFrac)) +
-      card("power", "Energy", energy(s.energyWh) + "/m\u00b2",
+      card("power", term("energy", "Energy"), energy(s.energyWh) + "/m\u00b2",
         s.meanPower.toFixed(0) + " average watts per m\u00b2, night included");
   }
 
@@ -853,6 +890,33 @@
       note = '<p class="margin-note">No LOLA profile reaches this site, so its horizon is an assumption rather than a measurement.</p>';
     }
 
+    /* Once a second site is pinned, Simple mode shows the trade it set up
+       rather than making the user switch to Expert to see it. */
+    var mini = "";
+    if (model.sites.length > 1) {
+      mini = '<table class="mini-compare">' +
+        '<tr><th>Compared</th><th class="num">Sun</th><th class="num">' + term("dte", "DTE") +
+        '</th><th class="num">Energy/m²</th></tr>' +
+        model.sites.map(function (e, i) {
+          return '<tr class="' + (i === 0 ? "lead" : "") + '"><td><i class="swatch" style="background:' + e.color + '"></i>' +
+            esc(e.short || e.name) + "</td>" +
+            '<td class="num">' + pct(e.summary.sunlitFrac) + "</td>" +
+            '<td class="num">' + pct(e.summary.dteFrac) + "</td>" +
+            '<td class="num">' + energy(e.summary.energyWh) + "</td></tr>";
+        }).join("") + "</table>";
+    }
+
+    var actions = '<div class="simple-actions">' +
+      '<button type="button" class="text-btn" data-action="compare">' +
+        (state.compareArm ? "Cancel adding" : "Compare with another site") + "</button>" +
+      '<button type="button" class="text-btn" data-action="date">Change the date</button>' +
+      '<button type="button" class="primary-btn" data-action="expert">Open the full console</button>' +
+      (state.compareArm
+        ? '<p class="hint arm">Now click another site on the globe to add it to the comparison (' +
+          state.selected.length + " of 3 pinned).</p>"
+        : '<p class="hint" id="sc-note"></p>') +
+      "</div>";
+
     el("simple-card").innerHTML =
       '<div class="kicker">' + esc(site.program || site.status || "Landing site") + "</div>" +
       "<h2>" + esc(site.name) + "</h2>" +
@@ -883,7 +947,9 @@
         "<dt>Next</dt><dd>" + esc(eventLine(entry, now, "sun")) + "</dd>" +
         eclipseLine(entry) +
       "</dl>" +
+      mini +
       note +
+      actions +
       '<p class="source">' + hours(state.durationHours) + " from " + utcStamp(state.landingMs) +
       ", with " + arrayText + " at " + state.efficiencyPct +
       "% cells. Airless geometry, checked against JPL Horizons to better than 0.01\u00b0.</p>";
@@ -894,24 +960,40 @@
       el("compare").innerHTML = "";
       return;
     }
+    /* The best value in each column is marked with weight and a star, not only
+       color, so the advantage survives a projector and color-blind eyes. */
+    var METRICS = [
+      { get: function (s) { return s.sunlitFrac; }, fmt: function (s) { return pct(s.sunlitFrac); }, better: "max" },
+      { get: function (s) { return s.longestNight.ms; }, fmt: function (s) { return msHours(s.longestNight.ms); }, better: "min" },
+      { get: function (s) { return s.dteFrac; }, fmt: function (s) { return pct(s.dteFrac); }, better: "max" },
+      { get: function (s) { return s.longestBlackout.ms; }, fmt: function (s) { return msHours(s.longestBlackout.ms); }, better: "min" },
+      { get: function (s) { return s.jointFrac; }, fmt: function (s) { return pct(s.jointFrac); }, better: "max" },
+      { get: function (s) { return s.energyWh; }, fmt: function (s) { return energy(s.energyWh); }, better: "max" },
+      { get: function (s) { return s.meanPower; }, fmt: function (s) { return s.meanPower.toFixed(0); }, better: "max" }
+    ];
+    var best = METRICS.map(function (metric) {
+      var values = model.sites.map(function (entry) { return metric.get(entry.summary); });
+      var target = metric.better === "max" ? Math.max.apply(null, values) : Math.min.apply(null, values);
+      /* A tie is not an advantage: mark nothing when every site reads the same. */
+      var ties = values.filter(function (v) { return v === target; }).length;
+      return ties === values.length ? null : target;
+    });
     var head = "<tr><th>Site</th><th class=\"num\">Sunlight</th><th class=\"num\">Longest night</th>" +
-      "<th class=\"num\">DTE</th><th class=\"num\">Longest gap</th><th class=\"num\">Joint</th>" +
-      "<th class=\"num\">Energy/m\u00b2</th><th class=\"num\">Mean W/m\u00b2</th></tr>";
+      '<th class="num">' + term("dte", "DTE") + "</th><th class=\"num\">Longest gap</th>" +
+      '<th class="num">' + term("joint", "Joint") + "</th>" +
+      '<th class="num">' + term("energy", "Energy/m\u00b2") + "</th><th class=\"num\">Mean W/m\u00b2</th></tr>";
     var rows = model.sites.map(function (entry) {
       var s = entry.summary;
+      var cells = METRICS.map(function (metric, i) {
+        var win = best[i] !== null && metric.get(s) === best[i];
+        return '<td class="num' + (win ? " best" : "") + '">' + metric.fmt(s) + "</td>";
+      }).join("");
       return "<tr><td><i class=\"swatch\" style=\"background:" + entry.color + "\"></i>" + esc(entry.name) +
-        (entry.id === model.primaryId ? " <span class=\"tag\">primary</span>" : "") + "</td>" +
-        '<td class="num">' + pct(s.sunlitFrac) + "</td>" +
-        '<td class="num">' + msHours(s.longestNight.ms) + "</td>" +
-        '<td class="num">' + pct(s.dteFrac) + "</td>" +
-        '<td class="num">' + msHours(s.longestBlackout.ms) + "</td>" +
-        '<td class="num">' + pct(s.jointFrac) + "</td>" +
-        '<td class="num">' + energy(s.energyWh) + "</td>" +
-        '<td class="num">' + s.meanPower.toFixed(0) + "</td></tr>";
+        (entry.id === model.primaryId ? " <span class=\"tag\">primary</span>" : "") + "</td>" + cells + "</tr>";
     }).join("");
     el("compare").innerHTML = '<section class="panel compare-panel"><div class="block-title">Same mask, same array, different place</div>' +
       '<table class="compare-table">' + head + rows + "</table>" +
-      '<p class="help">One landing epoch, one mission length, one horizon mask. The difference is the site.</p></section>';
+      '<p class="help">One landing epoch, one mission length, one horizon mask. The difference is the site. \u2605 marks the best value in each column; up to three sites keeps the row readable.</p></section>';
   }
 
   function flatComparison(site, panel) {
@@ -1047,10 +1129,27 @@
     }
   }
 
+  /* The timeline is the one control that separates the LANDING DATE (set in
+     the controls) from the PLAYHEAD (the moment on screen). Cheap enough to
+     refresh on every render, including the light ones during Play. */
+  function renderTimeline() {
+    var total = missionMs();
+    var offset = clamp(state.playheadMs - state.landingMs, 0, total);
+    var range = el("tl-range");
+    if (range.max !== String(total)) {
+      range.max = String(total);
+      range.step = "60000";
+    }
+    range.value = String(offset);
+    el("tl-now").textContent = utcStamp(state.playheadMs) + " \u00b7 " + elapsed(offset);
+    el("tl-t0").textContent = utcStamp(state.landingMs).replace(" UTC", "");
+    el("tl-t1").textContent = utcStamp(state.landingMs + total).replace(" UTC", "");
+  }
+
   function renderWindows() {
     var list = el("windows");
     if (state.scanning) {
-      list.innerHTML = '<p class="help">Screening start times, 6-hour steps\u2026</p>';
+      list.innerHTML = '<p class="busy">Screening start times, 6-hour steps\u2026</p>';
       return;
     }
     if (!state.windows.length) {
@@ -1284,6 +1383,7 @@
       renderSolve();
       syncEclipseButton(model);
     }
+    renderTimeline();
     drawCanvases(model);
   }
 
@@ -1306,6 +1406,7 @@
   function setMode(mode) {
     if (state.ui === mode) return;
     state.ui = mode;
+    state.compareArm = false;
     applyMode();
     recompute();
   }
@@ -1367,21 +1468,32 @@
     /* Picking a different site would leave the story's text describing a place
        that is no longer on screen, so the story steps aside. */
     state.story = null;
+    state.compareArm = false;
     state.selected = [id];
     resetPlayhead();
     recompute();
   }
 
+  /* Returns false when the comparison is full, so callers can say why nothing
+     happened instead of letting the click die silently. */
   function togglePin(id) {
     var index = state.selected.indexOf(id);
     if (index >= 0) {
-      if (state.selected.length === 1) return;
+      if (state.selected.length === 1) return true;
       state.selected.splice(index, 1);
     } else {
-      if (state.selected.length >= MAX_SITES) return;
+      if (state.selected.length >= MAX_SITES) {
+        var msg = "The comparison holds three sites, so the numbers stay readable. Unpin one to add " +
+          ((siteById(id) || {}).name || "this site") + ".";
+        el("site-note").textContent = msg;
+        var scNote = document.getElementById("sc-note");
+        if (scNote) scNote.textContent = msg;
+        return false;
+      }
       state.selected.push(id);
     }
     recompute();
+    return true;
   }
 
   function makePrimary(id) {
@@ -1594,8 +1706,18 @@
     var touched = false;
 
     var ui = params.get("ui");
-    if (ui === "simple" || ui === "expert") state.ui = ui;
-    state.story = storyById(params.get("st")) ? params.get("st") : null;
+    if ((ui === "simple" || ui === "expert") && ui !== state.ui) {
+      state.ui = ui;
+      touched = true;
+    }
+    /* A story IS a scenario, so a link that only names one must apply on
+       hashchange exactly as it does on load — storyFromHash() then rebuilds
+       the site, epoch, and window from it. */
+    var st = storyById(params.get("st")) ? params.get("st") : null;
+    if (st !== state.story) {
+      state.story = st;
+      touched = true;
+    }
 
     var sites = params.get("s");
     if (sites) {
@@ -1838,6 +1960,69 @@
     el("eclipse-btn").addEventListener("click", jumpToEclipse);
     el("play").addEventListener("click", togglePlay);
 
+    /* Timeline: slider and steps move the playhead only, never the landing
+       date. Light renders while dragging, a full one on release. */
+    el("tl-range").addEventListener("input", function () {
+      stopPlay();
+      setPlayhead(state.landingMs + Number(el("tl-range").value));
+    });
+    el("tl-range").addEventListener("change", function () {
+      render();
+    });
+    function stepPlayhead(ms) {
+      stopPlay();
+      setPlayhead(state.playheadMs + ms);
+      render();
+    }
+    el("tl-back-day").addEventListener("click", function () { stepPlayhead(-DAY); });
+    el("tl-back-hour").addEventListener("click", function () { stepPlayhead(-HOUR); });
+    el("tl-fwd-hour").addEventListener("click", function () { stepPlayhead(HOUR); });
+    el("tl-fwd-day").addEventListener("click", function () { stepPlayhead(DAY); });
+    el("tl-start").addEventListener("click", function () {
+      stopPlay();
+      setPlayhead(state.landingMs);
+      render();
+    });
+
+    /* Simple mode's plain-words actions live inside a card that re-renders, so
+       the handler sits on the container. */
+    el("simple-card").addEventListener("click", function (e) {
+      var button = e.target.closest("button[data-action]");
+      if (!button) return;
+      var action = button.getAttribute("data-action");
+      if (action === "compare") {
+        if (!state.compareArm && state.selected.length >= MAX_SITES) {
+          var scNote = document.getElementById("sc-note");
+          if (scNote) scNote.textContent = "The comparison holds three sites — remove one from the chips above first.";
+          return;
+        }
+        state.compareArm = !state.compareArm;
+        render();
+      } else if (action === "date") {
+        var dateInput = el("land-date");
+        dateInput.scrollIntoView({ block: "center", behavior: reduceMotion && reduceMotion.matches ? "auto" : "smooth" });
+        dateInput.focus({ preventScroll: true });
+      } else if (action === "expert") {
+        setMode("expert");
+      }
+    });
+
+    /* Term tooltips: click or tap toggles, Escape closes, and only one stays
+       open — the hover and focus paths are pure CSS. */
+    document.addEventListener("click", function (e) {
+      var hit = e.target.closest ? e.target.closest(".term") : null;
+      var open = document.querySelectorAll(".term.open");
+      for (var i = 0; i < open.length; i++) {
+        if (open[i] !== hit) open[i].classList.remove("open");
+      }
+      if (hit) hit.classList.toggle("open");
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      var open = document.querySelectorAll(".term.open");
+      for (var i = 0; i < open.length; i++) open[i].classList.remove("open");
+    });
+
     el("slip").addEventListener("change", function () {
       state.slipDays = parseFloat(el("slip").value);
       recompute();
@@ -1845,7 +2030,20 @@
 
     el("solve-form").addEventListener("submit", function (e) {
       e.preventDefault();
-      runSolve();
+      if (state.solving) return;
+      /* The solver brackets and bisects a whole mission, which can take a
+         moment on a year-long window; say so instead of freezing silently. */
+      state.solving = true;
+      el("solve-run").disabled = true;
+      el("solve-list").innerHTML = '<p class="busy">Bracketing the window and bisecting the roots…</p>';
+      window.setTimeout(function () {
+        try {
+          runSolve();
+        } finally {
+          state.solving = false;
+          el("solve-run").disabled = false;
+        }
+      }, 30);
     });
 
     el("solve-list").addEventListener("click", function (e) {
@@ -1879,8 +2077,15 @@
         onPick: function (hit) {
           /* A pole cluster is 17 sites inside a few degrees, so the first click
              flies the camera in instead of guessing which one you meant. */
-          if (hit.cluster) globeGoTo(-89, 0, 2.8);
-          else selectOnly(hit.id);
+          if (hit.cluster) {
+            globeGoTo(-89, 0, 2.8);
+          } else if (state.compareArm) {
+            /* Simple mode's "Compare with another site": this pick ADDS. */
+            if (togglePin(hit.id)) state.compareArm = false;
+            render();
+          } else {
+            selectOnly(hit.id);
+          }
         }
       });
     }
@@ -1988,6 +2193,8 @@
         resetPlayhead();
         dropCache();
         render();
+        /* Same as boot: a story link lands with the camera on its site. */
+        if (state.story) flyToPrimary();
       }
     });
   }

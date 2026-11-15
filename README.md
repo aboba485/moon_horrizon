@@ -50,6 +50,8 @@ The header switches between **Simple** and **Expert**. Both run exactly the same
 
 **Simple** is the default: a rotatable Moon and one card. Drag to spin it, scroll or `+`/`-` to zoom, arrow keys to steer, and click a marker to read that site. The lighting is not decoration — the terminator is drawn at the subsolar point the ephemeris returns for the playhead, so pressing **Play** shows the real terminator sweep. The blue ring marks the sub-Earth point, which is where Earth sits directly overhead.
 
+The card ends in the three actions Simple mode runs on: **Compare with another site** arms the next globe click to *add* that site to the comparison instead of replacing the selection (a compact table appears in the card once a second site is pinned), **Change the date** jumps to the landing-date control, and **Open the full console** switches to Expert. Dotted-underlined terms (DTE, Energy, Joint) open a plain-words tooltip on hover, click, tap, or keyboard focus.
+
 Fifteen of the thirty catalogue sites lie within a few degrees of the south pole and would overlap into one unclickable dot at globe scale, so they collapse into a single **South pole** marker. Clicking it flies the camera down to the pole and zooms in, at which point every polar site gets its own marker. Whatever site is currently selected always keeps its own labelled marker, even inside that cluster.
 
 The globe is a hand-drawn orthographic projection on a 2D canvas, not WebGL. That is deliberate: a WebGL texture loaded from a `file://` URL is treated as cross-origin and cannot be uploaded, which would break the double-click-to-open requirement.
@@ -88,7 +90,7 @@ Below the view, **Where the data comes from, and how it was checked** lists the 
 - Click a site row or the map to make it the only selection. The **pin** button adds it to a comparison of up to three. The first chip is primary; clicking a chip promotes it.
 - The map pans by dragging and zooms on the scroll wheel, anchored at the cursor; double-click returns it to the whole disc, as does switching projection. The scale bar regrades as you zoom. A drag is not a click, so panning never changes the selection.
 - The landing epoch is the start of the window. The playhead scrubs inside the window and drives the horizon view and the readout; it does not move the landing date.
-- Drag or click the chart to move the playhead. Space plays and pauses, arrow keys step one hour, Shift and an arrow steps one day.
+- The **timeline bar** under the controls is the playhead's home, in both modes: a slider across the whole window, **Play**/**Pause**, ±1 h and ±1 d steps, a **⇤ Landing** reset, and the current UTC moment with its T+ offset. Dragging or clicking the chart moves the same playhead. Space plays and pauses, arrow keys step one hour, Shift and an arrow steps one day.
 - **Scan the next year** ranks start times for the primary site at the current mission length, mask, and array. It is a 6-hour screen, not a flight product; click a result to open that date at full resolution.
 - **Next eclipse** moves the playhead to the next time Earth crosses the Sun at the primary site. **If we slip** sets the offset for the comparison table.
 - **Find a Sun position**, in the left column, answers the inverse question: when is the Sun at this elevation or bearing. Clicking a result jumps the playhead.

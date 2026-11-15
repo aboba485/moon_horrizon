@@ -3,21 +3,25 @@
    Session 3 owns the model and calls these with sampleMission / evaluate output.
    Azimuth convention everywhere: 0 north, 90 east, clockwise, same as Horizons. */
 (function (root) {
+  /* Mirrors the CSS custom properties in styles.css: dark-blue surfaces, white
+     ink, amber Sun, cyan Earth. Change them together or the plots stop looking
+     like part of the page. */
   const C = {
-    bg: "#0c0b09",
-    panel: "#11100d",
-    ink: "#f4efe6",
-    muted: "#a79d90",
-    faint: "#6f675c",
-    sun: "#f0a202",
-    sun2: "#ffd27a",
-    earth: "#3db7e8",
-    earth2: "#b7e6f8",
-    warn: "#e08a62",
-    line: "rgba(243, 232, 214, 0.12)",
-    lineStrong: "rgba(243, 232, 214, 0.3)",
-    ground: "rgba(167, 157, 144, 0.12)",
-    groundEdge: "rgba(244, 239, 230, 0.75)"
+    bg: "#081426",
+    panel: "#0d1c32",
+    ink: "#f5f8ff",
+    muted: "#acbcd3",
+    faint: "#7a8ca6",
+    accent: "#76a9ff",
+    sun: "#ffc24d",
+    sun2: "#ffdd9b",
+    earth: "#45c8e8",
+    earth2: "#a9e6f7",
+    warn: "#f2a07b",
+    line: "rgba(172, 188, 211, 0.14)",
+    lineStrong: "rgba(172, 188, 211, 0.32)",
+    ground: "rgba(172, 188, 211, 0.12)",
+    groundEdge: "rgba(245, 248, 255, 0.78)"
   };
   const SANS = '"Outfit", sans-serif';
   const MONO = '"IBM Plex Mono", ui-monospace, monospace';
@@ -643,7 +647,7 @@
     for (const run of runs) {
       const xa = x(run.startMs);
       const bw = Math.max(3, x(run.endMs) - xa);
-      ctx.fillStyle = "rgba(61, 183, 232, 0.2)";
+      ctx.fillStyle = "rgba(69, 200, 232, 0.2)";
       ctx.fillRect(xa, m.top, bw, ph);
       ctx.fillStyle = C.earth;
       ctx.fillRect(xa, m.top, bw, 2);
@@ -692,7 +696,7 @@
       ctx.lineTo(x(prim.samples[prim.samples.length - 1].t), y0);
       ctx.lineTo(x(prim.samples[0].t), y0);
       ctx.closePath();
-      ctx.fillStyle = "rgba(240, 162, 2, 0.16)";
+      ctx.fillStyle = "rgba(255, 194, 77, 0.14)";
       ctx.fill();
       ctx.restore();
     }
@@ -1047,7 +1051,7 @@
       // plot disk
       ctx.beginPath();
       ctx.arc(ctr.x, ctr.y, rimR, 0, 2 * Math.PI);
-      ctx.fillStyle = "#1a1813";
+      ctx.fillStyle = "#0b1a30";
       ctx.fill();
 
       // basemap, resampled through the same projection
@@ -1109,7 +1113,7 @@
       ctx.beginPath();
       ctx.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
       ctx.clip();
-      ctx.fillStyle = "#1a1813";
+      ctx.fillStyle = "#0b1a30";
       ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
 
       const img = basemapImage();
